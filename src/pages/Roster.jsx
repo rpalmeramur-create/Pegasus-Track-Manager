@@ -1,0 +1,1079 @@
+import React, { useEffect, useState, useCallback, useRef } from 'react'
+import { Search, UserPlus, Edit2, Trash2, X, Pencil, Upload, MapPin, User, Calendar } from 'lucide-react'
+import { athleteApi } from '../mockStore.js'
+
+const api = window.electronAPI ?? athleteApi
+
+function getAgeGroup(age) {
+  if (age <= 6)  return '5-6'
+  if (age <= 8)  return '7-8'
+  if (age <= 10) return '9-10'
+  if (age <= 12) return '11-12'
+  if (age <= 14) return '13-14'
+  if (age <= 16) return '15-16'
+  return '17-18'
+}
+
+function calcAge(dob) {
+  if (!dob) return null
+  return Math.floor((Date.now() - new Date(dob)) / (365.25 * 24 * 3600 * 1000))
+}
+
+// ─── Athlete Form Modal ───────────────────────────────────────
+function AthleteModal({ athlete, teams, onSave, onClose }) {
+  const isEditing = !!athlete?.id
+  const [form, setForm] = useState({
+    first_name:     athlete?.first_name     ?? '',
+    last_name:      athlete?.last_name      ?? '',
+    date_of_birth:  athlete?.date_of_birth  ?? '',
+    gender:         athlete?.gender         ?? '',
+    athlete_number: athlete?.athlete_number ?? '',
+    team:           athlete?.team           ?? 'Pegasus Track',
+    notes:          athlete?.notes          ?? '',
+  })
+  const [errors, setErrors] = useState({})
+  const [saving, setSaving] = useState(false)
+
+  const set = (field, value) => {
+    setForm(f => ({ ...f, [field]: value }))
+    setErrors(e => ({ ...e, [field]: '' }))
+  }
+
+  const validate = () => {
+    const e = {}
+    if (!form.first_name.trim()) e.first_name = 'First name is required'
+    if (!form.last_name.trim())  e.last_name  = 'Last name is required'
+    if (!form.date_of_birth)     e.date_of_birth = 'Date of birth is required'
+    if (!form.gender)            e.gender = 'Gender is required'
+    if (!form.team.trim())       e.team = 'Team is required'
+    if (form.date_of_birth) {
+      const age = calcAge(form.date_of_birth + 'T00:00:00')
+      if (age < 5 || age > 18) e.date_of_birth = 'Age must be between 5 and 18'
+    }
+    setErrors(e)
+    return Object.keys(e).length === 0
+  }
+
+  const handleSave = async () => {
+    if (!validate()) return
+    setSaving(true)
+    try { await onSave(form) }
+    finally { setSaving(false) }
+  }
+
+  const previewAge = form.date_of_birth ? calcAge(form.date_of_birth + 'T00:00:00') : null
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal">
+        <div className="modal-header">
+          <div className="modal-title">{isEditing ? 'Edit Athlete' : 'Add Athlete'}</div>
+          <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={15} /></button>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          {/* First Name */}
+          <div className="form-group">
+            <label className="form-label">First Name <span style={{ color: 'var(--red)' }}>*</span></label>
+            <input className="input" value={form.first_name}
+              onChange={e => set('first_name', e.target.value)} placeholder="Jane" autoFocus />
+            {errors.first_name && <span className="form-error">{errors.first_name}</span>}
+          </div>
+
+          {/* Last Name */}
+          <div className="form-group">
+            <label className="form-label">Last Name <span style={{ color: 'var(--red)' }}>*</span></label>
+            <input className="input" value={form.last_name}
+              onChange={e => set('last_name', e.target.value)} placeholder="Smith" />
+            {errors.last_name && <span className="form-error">{errors.last_name}</span>}
+          </div>
+
+          {/* Date of Birth */}
+          <div className="form-group">
+            <label className="form-label">
+              Date of Birth <span style={{ color: 'var(--red)' }}>*</span>
+              {previewAge !== null && (
+                <span style={{ color: 'var(--accent)', marginLeft: 6, textTransform: 'none', letterSpacing: 0 }}>
+                  — Age {previewAge}
+                </span>
+              )}
+            </label>
+            <input className="input" type="date" value={form.date_of_birth}
+              onChange={e => set('date_of_birth', e.target.value)} />
+            {errors.date_of_birth && <span className="form-error">{errors.date_of_birth}</span>}
+          </div>
+
+          {/* Gender */}
+          <div className="form-group">
+            <label className="form-label">Gender <span style={{ color: 'var(--red)' }}>*</span></label>
+            <select className="input" value={form.gender} onChange={e => set('gender', e.target.value)}>
+              <option value="">Select...</option>
+              <option value="M">Male</option>
+              <option value="F">Female</option>
+            </select>
+            {errors.gender && <span className="form-error">{errors.gender}</span>}
+          </div>
+
+          {/* Team */}
+          <div className="form-group" style={{ gridColumn: 'span 2' }}>
+            <label className="form-label">Team <span style={{ color: 'var(--red)' }}>*</span></label>
+            <input
+              className="input"
+              list="team-suggestions"
+              value={form.team}
+              onChange={e => set('team', e.target.value)}
+              placeholder="Pegasus Track"
+            />
+            <datalist id="team-suggestions">
+              {teams.map(t => <option key={t} value={t} />)}
+            </datalist>
+            {errors.team && <span className="form-error">{errors.team}</span>}
+          </div>
+
+          {/* Athlete Number */}
+          <div className="form-group" style={{ gridColumn: 'span 2' }}>
+            <label className="form-label">
+              Athlete # &nbsp;
+              <span style={{ color: 'var(--text-muted)', textTransform: 'none', letterSpacing: 0 }}>Optional</span>
+            </label>
+            <input className="input" value={form.athlete_number}
+              onChange={e => set('athlete_number', e.target.value)}
+              placeholder="Club ID or bib number" />
+          </div>
+        </div>
+
+        {/* Notes */}
+        <div className="form-group" style={{ marginTop: 16 }}>
+          <label className="form-label">
+            Notes &nbsp;
+            <span style={{ color: 'var(--text-muted)', textTransform: 'none', letterSpacing: 0 }}>Optional</span>
+          </label>
+          <textarea className="input" value={form.notes}
+            onChange={e => set('notes', e.target.value)}
+            placeholder="Any notes about this athlete..." rows={3} />
+        </div>
+
+        <div className="modal-footer">
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+            {saving ? 'Saving…' : isEditing ? 'Save Changes' : 'Add Athlete'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Rename Team Modal ────────────────────────────────────────
+function RenameTeamModal({ teamName, count, onConfirm, onClose }) {
+  const [value, setValue] = useState(teamName)
+  const [saving, setSaving] = useState(false)
+  const inputRef = useRef(null)
+
+  useEffect(() => { inputRef.current?.select() }, [])
+
+  const handleConfirm = async () => {
+    if (!value.trim() || value.trim() === teamName) { onClose(); return }
+    setSaving(true)
+    await onConfirm(value.trim())
+    setSaving(false)
+  }
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ maxWidth: 420 }}>
+        <div className="modal-header">
+          <div className="modal-title">Rename Team</div>
+          <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={15} /></button>
+        </div>
+        <p style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 16, lineHeight: 1.6 }}>
+          Renaming <strong style={{ color: 'var(--text-primary)' }}>{teamName}</strong> will
+          update all {count} athlete{count !== 1 ? 's' : ''} on this team.
+        </p>
+        <div className="form-group">
+          <label className="form-label">New Team Name</label>
+          <input
+            ref={inputRef}
+            className="input"
+            value={value}
+            onChange={e => setValue(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleConfirm()}
+          />
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" onClick={handleConfirm} disabled={saving || !value.trim()}>
+            {saving ? 'Renaming…' : 'Rename Team'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Delete Confirm Modal ─────────────────────────────────────
+function DeleteModal({ athlete, onConfirm, onClose }) {
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ maxWidth: 400 }}>
+        <div className="modal-header">
+          <div className="modal-title">Remove Athlete</div>
+          <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={15} /></button>
+        </div>
+        <p style={{ color: 'var(--text-secondary)', fontSize: 14, lineHeight: 1.6 }}>
+          Remove{' '}
+          <strong style={{ color: 'var(--text-primary)' }}>
+            {athlete.first_name} {athlete.last_name}
+          </strong>{' '}
+          from the active roster? Their historical records will be preserved.
+        </p>
+        <div className="modal-footer">
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-danger" onClick={onConfirm}>Remove Athlete</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Clear Roster Modal ───────────────────────────────────────
+function ClearRosterModal({ count, onConfirm, onClose }) {
+  const [confirming, setConfirming] = useState(false)
+
+  const handleConfirm = async () => {
+    setConfirming(true)
+    try { await onConfirm() }
+    finally { setConfirming(false) }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ maxWidth: 420 }}>
+        <div className="modal-header">
+          <div className="modal-title">Clear Roster</div>
+          <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={15} /></button>
+        </div>
+        <p style={{ color: 'var(--text-secondary)', fontSize: 14, lineHeight: 1.7, marginBottom: 8 }}>
+          This will remove all{' '}
+          <strong style={{ color: 'var(--text-primary)' }}>{count} athlete{count !== 1 ? 's' : ''}</strong>{' '}
+          from the active roster. Historical meet results will be preserved, but the athletes will no longer appear in the roster.
+        </p>
+        <p style={{ color: 'var(--red, #ef4444)', fontSize: 13, lineHeight: 1.6 }}>
+          This cannot be undone.
+        </p>
+        <div className="modal-footer">
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-danger" onClick={handleConfirm} disabled={confirming}>
+            {confirming ? 'Clearing…' : `Clear ${count} Athlete${count !== 1 ? 's' : ''}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Import Preview Modal ─────────────────────────────────────
+function ImportPreviewModal({ athletes, onConfirm, onClose }) {
+  const [selected, setSelected] = useState(
+    () => new Set(athletes.map((_, i) => i).filter(i => !athletes[i].duplicate))
+  )
+  const [importing, setImporting] = useState(false)
+
+  const toggle = (i) => setSelected(prev => {
+    const next = new Set(prev)
+    next.has(i) ? next.delete(i) : next.add(i)
+    return next
+  })
+
+  const allNew = athletes.filter(a => !a.duplicate)
+  const toggleAll = () => {
+    const allNewIdxs = allNew.map((_, j) => athletes.indexOf(allNew[j]))
+    const allChecked = allNewIdxs.every(i => selected.has(i))
+    setSelected(prev => {
+      const next = new Set(prev)
+      allNewIdxs.forEach(i => allChecked ? next.delete(i) : next.add(i))
+      return next
+    })
+  }
+
+  const handleConfirm = async () => {
+    setImporting(true)
+    await onConfirm(athletes.filter((_, i) => selected.has(i)))
+    setImporting(false)
+  }
+
+  const dupCount = athletes.filter(a => a.duplicate).length
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ maxWidth: 620 }}>
+        <div className="modal-header">
+          <div className="modal-title">Import from Hy-tek</div>
+          <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={15} /></button>
+        </div>
+
+        <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16, lineHeight: 1.6 }}>
+          Found <strong style={{ color: 'var(--text-primary)' }}>{athletes.length}</strong> athlete{athletes.length !== 1 ? 's' : ''} in the TCL file.
+          {dupCount > 0 && <> <span style={{ color: 'var(--gold)' }}>{dupCount} already exist</span> in your roster and are unchecked by default.</>}
+        </p>
+
+        <div style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', marginBottom: 16 }}>
+          {/* Header */}
+          <div style={{
+            display: 'grid', gridTemplateColumns: '32px 1fr 70px 110px 50px',
+            gap: 8, padding: '8px 12px',
+            background: 'var(--bg-tertiary)', borderBottom: '1px solid var(--border)',
+            fontSize: 11, fontWeight: 600, letterSpacing: '0.07em',
+            textTransform: 'uppercase', color: 'var(--text-muted)',
+          }}>
+            <input type="checkbox"
+              checked={allNew.length > 0 && allNew.every((_, j) => selected.has(athletes.indexOf(allNew[j])))}
+              onChange={toggleAll}
+              style={{ cursor: 'pointer' }}
+              title="Select / deselect all new athletes"
+            />
+            <div>Name</div>
+            <div>Gender</div>
+            <div>Date of Birth</div>
+            <div>#</div>
+          </div>
+
+          {/* Rows */}
+          <div style={{ maxHeight: 340, overflowY: 'auto' }}>
+            {athletes.map((a, i) => (
+              <div key={i} style={{
+                display: 'grid', gridTemplateColumns: '32px 1fr 70px 110px 50px',
+                gap: 8, padding: '8px 12px',
+                borderBottom: '1px solid rgba(28,40,71,0.5)',
+                alignItems: 'center',
+                opacity: selected.has(i) ? 1 : 0.45,
+                transition: 'opacity 0.1s',
+              }}>
+                <input type="checkbox" checked={selected.has(i)} onChange={() => toggle(i)} style={{ cursor: 'pointer' }} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                  <div className={`avatar avatar-${a.gender === 'M' ? 'male' : 'female'}`} style={{ width: 28, height: 28, fontSize: 11, flexShrink: 0 }}>
+                    {a.first_name[0]}{a.last_name[0]}
+                  </div>
+                  <span style={{ fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {a.last_name}, {a.first_name}
+                  </span>
+                  {a.duplicate && <span className="badge badge-gold" style={{ fontSize: 10, flexShrink: 0 }}>Exists</span>}
+                </div>
+                <div>
+                  <span className={`badge badge-${a.gender === 'M' ? 'blue' : 'gold'}`} style={{ fontSize: 10 }}>
+                    {a.gender === 'M' ? 'Male' : 'Female'}
+                  </span>
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                  {new Date(a.date_of_birth + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+                  {a.athlete_number || '—'}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="modal-footer">
+          <span style={{ fontSize: 12, color: 'var(--text-secondary)', marginRight: 'auto' }}>
+            {selected.size} athlete{selected.size !== 1 ? 's' : ''} selected
+          </span>
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" onClick={handleConfirm} disabled={importing || selected.size === 0}>
+            {importing ? 'Importing…' : `Import ${selected.size}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function resizeImageToDataUrl(file, maxPx = 256) {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    const url = URL.createObjectURL(file)
+    img.onload = () => {
+      const scale = Math.min(1, maxPx / Math.max(img.width, img.height))
+      const w = Math.round(img.width  * scale)
+      const h = Math.round(img.height * scale)
+      const canvas = document.createElement('canvas')
+      canvas.width  = w
+      canvas.height = h
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h)
+      URL.revokeObjectURL(url)
+      resolve(canvas.toDataURL('image/png'))
+    }
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Failed to load image')) }
+    img.src = url
+  })
+}
+
+// ─── Team Profile Modal ───────────────────────────────────────
+function TeamProfileModal({ teamName, profile, onSave, onClose }) {
+  const [form, setForm] = useState({
+    location:    profile?.location    ?? '',
+    head_coach:  profile?.head_coach  ?? '',
+    founded:     profile?.founded     ?? '',
+    description: profile?.description ?? '',
+    logo:        profile?.logo        ?? null,
+  })
+  const [saving, setSaving]         = useState(false)
+  const [logoLoading, setLogoLoading] = useState(false)
+  const logoInputRef = useRef(null)
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+
+  const handleLogoChange = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setLogoLoading(true)
+    try {
+      const dataUrl = await resizeImageToDataUrl(file, 256)
+      set('logo', dataUrl)
+    } catch {}
+    finally { setLogoLoading(false) }
+    e.target.value = ''
+  }
+
+  const handleSave = async () => {
+    setSaving(true)
+    try { await onSave({ name: teamName, ...form }) }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ maxWidth: 440 }}>
+        <div className="modal-header">
+          <div className="modal-title">Edit Team Profile</div>
+          <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={15} /></button>
+        </div>
+
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16, fontFamily: 'var(--font-display)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+          {teamName}
+        </div>
+
+        {/* Logo upload */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 20 }}>
+          <div style={{
+            width: 64, height: 64, borderRadius: 10,
+            background: 'var(--bg-tertiary)',
+            border: '1px solid var(--border)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            overflow: 'hidden', flexShrink: 0,
+          }}>
+            {logoLoading ? (
+              <div className="loading-spinner" style={{ width: 20, height: 20 }} />
+            ) : form.logo ? (
+              <img src={form.logo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            ) : (
+              <span style={{ fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0 }}>
+                {teamName.slice(0, 2)}
+              </span>
+            )}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <button className="btn btn-ghost" style={{ fontSize: 12 }}
+              onClick={() => logoInputRef.current?.click()} disabled={logoLoading}>
+              {form.logo ? 'Change Logo' : 'Upload Logo'}
+            </button>
+            {form.logo && (
+              <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--red, #ef4444)' }}
+                onClick={() => set('logo', null)}>
+                Remove
+              </button>
+            )}
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>PNG, JPG, or SVG</span>
+          </div>
+          <input ref={logoInputRef} type="file" accept="image/*"
+            style={{ display: 'none' }} onChange={handleLogoChange} />
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div className="form-group">
+            <label className="form-label">Location</label>
+            <input className="input" placeholder="e.g. Miami, FL"
+              value={form.location} onChange={e => set('location', e.target.value)} autoFocus />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Head Coach</label>
+            <input className="input" placeholder="e.g. Coach Johnson"
+              value={form.head_coach} onChange={e => set('head_coach', e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Year Founded</label>
+            <input className="input" placeholder="e.g. 2015" style={{ maxWidth: 140 }}
+              value={form.founded} onChange={e => set('founded', e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Description</label>
+            <textarea className="input" rows={3}
+              placeholder="Short description or notes about this team..."
+              value={form.description} onChange={e => set('description', e.target.value)} />
+          </div>
+        </div>
+
+        <div className="modal-footer">
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving || logoLoading}>
+            {saving ? 'Saving…' : 'Save Profile'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Athlete Profile Panel ────────────────────────────────────
+const CATEGORY_LABELS = { track: 'Track', relay: 'Relay', field: 'Field', combined: 'Combined' }
+
+function AthleteProfilePanel({ athlete, prs, loading, onClose }) {
+  const grouped = {}
+  for (const pr of prs) {
+    const cat = pr.category || 'track'
+    if (!grouped[cat]) grouped[cat] = []
+    grouped[cat].push(pr)
+  }
+  const cats = ['track', 'relay', 'field', 'combined'].filter(c => grouped[c])
+
+  return (
+    <>
+      <div onClick={onClose} style={{
+        position: 'fixed', inset: 0, zIndex: 400,
+        background: 'rgba(0,0,0,0.4)',
+      }} />
+      <div style={{
+        position: 'fixed', right: 0, top: 0, bottom: 0, width: 360, zIndex: 401,
+        background: 'var(--bg-secondary)',
+        borderLeft: '1px solid var(--border-light)',
+        boxShadow: 'var(--shadow-lg)',
+        display: 'flex', flexDirection: 'column',
+        animation: 'slideInRight 0.2s var(--ease)',
+      }}>
+        {/* Header */}
+        <div style={{
+          display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
+          padding: '20px 20px 16px', borderBottom: '1px solid var(--border)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div
+              className={`avatar avatar-${athlete.gender === 'M' ? 'male' : 'female'}`}
+              style={{ width: 48, height: 48, fontSize: 17 }}
+            >
+              {athlete.first_name[0]}{athlete.last_name[0]}
+            </div>
+            <div>
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 700, lineHeight: 1.1 }}>
+                {athlete.last_name.toUpperCase()}, {athlete.first_name}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 3 }}>
+                Age {athlete.age} · {athlete.gender === 'M' ? 'Male' : 'Female'} · {getAgeGroup(athlete.age)}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 1 }}>
+                {athlete.team || 'Pegasus Track'}
+              </div>
+            </div>
+          </div>
+          <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={15} /></button>
+        </div>
+
+        {/* PR list */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
+          <div style={{
+            fontFamily: 'var(--font-display)', fontSize: 11, fontWeight: 600,
+            letterSpacing: '0.1em', textTransform: 'uppercase',
+            color: 'var(--text-muted)', marginBottom: 14,
+          }}>
+            Personal Bests
+          </div>
+
+          {loading ? (
+            <div className="loading-container" style={{ height: 120 }}><div className="loading-spinner" /></div>
+          ) : prs.length === 0 ? (
+            <div style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', paddingTop: 32 }}>
+              No personal bests recorded yet.
+            </div>
+          ) : (
+            cats.map(cat => (
+              <div key={cat} style={{ marginBottom: 20 }}>
+                <div style={{
+                  fontSize: 10, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase',
+                  color: 'var(--text-muted)', paddingBottom: 6,
+                  borderBottom: '1px solid var(--border)', marginBottom: 8,
+                }}>
+                  {CATEGORY_LABELS[cat]}
+                </div>
+                {grouped[cat].map(pr => (
+                  <div key={pr.event_name} style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '8px 0', borderBottom: '1px solid rgba(28,40,71,0.5)',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                      <span style={{ fontSize: 13, fontWeight: 500 }}>{pr.event_name}</span>
+                      {pr.indoor ? <span className="badge badge-neutral" style={{ fontSize: 10 }}>Indoor</span> : null}
+                    </div>
+                    <span style={{ fontFamily: 'var(--font-display)', fontSize: 17, fontWeight: 700, color: 'var(--accent)' }}>
+                      {pr.mark}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </>
+  )
+}
+
+// ─── Roster Page ──────────────────────────────────────────────
+export default function Roster() {
+  const [athletes, setAthletes]   = useState([])
+  const [loading, setLoading]     = useState(true)
+  const [search, setSearch]       = useState('')
+  const [filterGender, setGender] = useState('all')
+  const [filterAge, setFilterAge] = useState('all')
+  const [filterTeam, setTeam]     = useState('all')
+  const [showAdd, setShowAdd]     = useState(false)
+  const [editing, setEditing]     = useState(null)
+  const [deleting, setDeleting]   = useState(null)
+  const [renaming, setRenaming]   = useState(null) // team name string
+  const [viewing, setViewing]           = useState(null)
+  const [athletePRs, setAthletePRs]     = useState([])
+  const [loadingPRs, setLoadingPRs]     = useState(false)
+  const [importAthletes, setImportAthletes] = useState(null)
+  const [importing, setImporting]       = useState(false)
+  const [clearingRoster, setClearingRoster] = useState(false)
+  const [teamProfiles, setTeamProfiles] = useState({}) // keyed by team name
+  const [editingProfile, setEditingProfile] = useState(null) // team name string
+
+  const loadAthletes = useCallback(() => {
+    setLoading(true)
+    api.getAthletes()
+      .then(data => { setAthletes(data); setLoading(false) })
+      .catch(() => setLoading(false))
+  }, [])
+
+  useEffect(() => { loadAthletes() }, [loadAthletes])
+
+  useEffect(() => {
+    if (!api.getTeamProfiles) return
+    api.getTeamProfiles()
+      .then(rows => {
+        const map = {}
+        for (const p of rows) map[p.name] = p
+        setTeamProfiles(map)
+      })
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    if (!viewing) { setAthletePRs([]); return }
+    setLoadingPRs(true)
+    api.getAthletePRs(viewing.id)
+      .then(data => { setAthletePRs(data); setLoadingPRs(false) })
+      .catch(() => setLoadingPRs(false))
+  }, [viewing])
+
+  const handleAdd = async (form) => {
+    const a = await api.createAthlete(form)
+    setAthletes(prev => [...prev, a])
+    setShowAdd(false)
+  }
+
+  const handleEdit = async (form) => {
+    const a = await api.updateAthlete(editing.id, form)
+    setAthletes(prev => prev.map(x => x.id === editing.id ? a : x))
+    setEditing(null)
+  }
+
+  const handleDelete = async () => {
+    await api.deleteAthlete(deleting.id)
+    setAthletes(prev => prev.filter(x => x.id !== deleting.id))
+    setDeleting(null)
+  }
+
+  const handleStartImport = async () => {
+    if (!api.importTCL) return
+    setImporting(true)
+    try {
+      const result = await api.importTCL()
+      if (!result) return                          // user cancelled dialog
+      if (result.error) { alert(`Import failed: ${result.error}`); return }
+      setImportAthletes(result)
+    } catch (err) {
+      alert(`Import error: ${err.message}`)
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  const handleConfirmImport = async (selected) => {
+    for (const a of selected) {
+      const { duplicate, ...data } = a
+      const created = await api.createAthlete(data)
+      setAthletes(prev => [...prev, created])
+    }
+    setImportAthletes(null)
+  }
+
+  const handleClearRoster = async () => {
+    if (!api.clearRoster) { alert('Clear roster is not available — please restart Electron.'); return }
+    await api.clearRoster()
+    setAthletes([])
+    setClearingRoster(false)
+  }
+
+  const handleRenameTeam = async (newName) => {
+    await api.renameTeam(renaming, newName)
+    setAthletes(prev => prev.map(a =>
+      (a.team || HOME_TEAM) === renaming ? { ...a, team: newName } : a
+    ))
+    if (filterTeam === renaming) setTeam(newName)
+    // Migrate profile key to new name
+    setTeamProfiles(prev => {
+      const next = { ...prev }
+      if (next[renaming]) {
+        next[newName] = { ...next[renaming], name: newName }
+        delete next[renaming]
+      } else {
+        delete next[renaming]
+      }
+      return next
+    })
+    setRenaming(null)
+  }
+
+  const handleSaveProfile = async (data) => {
+    if (!api.saveTeamProfile) return
+    const saved = await api.saveTeamProfile(data)
+    setTeamProfiles(prev => ({ ...prev, [saved.name]: saved }))
+    setEditingProfile(null)
+  }
+
+  // Distinct teams sorted: home team first, then alphabetical
+  const HOME_TEAM = 'Pegasus Track'
+  const teams = [
+    HOME_TEAM,
+    ...Array.from(new Set(athletes.map(a => a.team || HOME_TEAM)))
+      .filter(t => t !== HOME_TEAM)
+      .sort(),
+  ]
+  const multipleTeams = teams.length > 1
+
+  // ── Filters ─────────────────────────────────────────────────
+  const filtered = athletes.filter(a => {
+    const q = search.toLowerCase()
+    const matchSearch = !q
+      || `${a.first_name} ${a.last_name}`.toLowerCase().includes(q)
+      || (a.athlete_number && a.athlete_number.includes(q))
+    const matchGender = filterGender === 'all' || a.gender === filterGender
+    const matchAge    = filterAge    === 'all' || getAgeGroup(a.age) === filterAge
+    const matchTeam   = filterTeam   === 'all' || (a.team || HOME_TEAM) === filterTeam
+    return matchSearch && matchGender && matchAge && matchTeam
+  })
+
+  const countFor = (team) => athletes.filter(a => (a.team || HOME_TEAM) === team).length
+  const maleCount   = filtered.filter(a => a.gender === 'M').length
+  const femaleCount = filtered.filter(a => a.gender === 'F').length
+  const hasFilters  = search || filterGender !== 'all' || filterAge !== 'all'
+
+  const clearFilters = () => { setSearch(''); setGender('all'); setFilterAge('all') }
+
+  return (
+    <div className="roster-page">
+      {/* Header */}
+      <div className="page-header">
+        <div>
+          <div className="page-title">TEAMS</div>
+          <div className="page-subtitle">
+            {filtered.length} athletes &middot; {maleCount} male &middot; {femaleCount} female
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {api.importTCL && (
+            <button className="btn btn-ghost" onClick={handleStartImport} disabled={importing}>
+              <Upload size={15} /> {importing ? 'Reading…' : 'Import Hy-tek'}
+            </button>
+          )}
+          {athletes.length > 0 && (
+            <button className="btn btn-danger" onClick={() => setClearingRoster(true)}>
+              <Trash2 size={15} /> Clear Roster
+            </button>
+          )}
+          <button className="btn btn-primary" onClick={() => setShowAdd(true)}>
+            <UserPlus size={15} /> Add Athlete
+          </button>
+        </div>
+      </div>
+
+      {/* Team Profile Cards */}
+      <div className="team-cards">
+        {multipleTeams && (
+          <div
+            className={`team-card ${filterTeam === 'all' ? 'active' : ''}`}
+            onClick={() => setTeam('all')}
+          >
+            <div className="team-card-header">
+              <div className="team-card-name">All Teams</div>
+            </div>
+            <hr className="team-card-divider" />
+            <div className="team-card-count">{athletes.length}</div>
+            <div className="team-card-breakdown">
+              {athletes.filter(a => a.gender === 'M').length}M &middot; {athletes.filter(a => a.gender === 'F').length}F
+            </div>
+          </div>
+        )}
+        {teams.map(t => {
+          const profile = teamProfiles[t]
+          const count   = countFor(t)
+          const mc = athletes.filter(a => (a.team || HOME_TEAM) === t && a.gender === 'M').length
+          const fc = athletes.filter(a => (a.team || HOME_TEAM) === t && a.gender === 'F').length
+          return (
+            <div
+              key={t}
+              className={`team-card ${filterTeam === t ? 'active' : ''}`}
+              onClick={() => setTeam(filterTeam === t ? 'all' : t)}
+            >
+              {/* Logo + name + actions row */}
+              <div className="team-card-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0 }}>
+                  <div className="team-card-logo">
+                    {profile?.logo
+                      ? <img src={profile.logo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 6 }} />
+                      : <span style={{ fontFamily: 'var(--font-display)', fontSize: 14, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0 }}>
+                          {t.slice(0, 2)}
+                        </span>
+                    }
+                  </div>
+                  <div className="team-card-name">{t}</div>
+                </div>
+                <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
+                  <button
+                    className="btn btn-ghost btn-icon"
+                    style={{ padding: 3, width: 22, height: 22, opacity: 0.55 }}
+                    title={`Rename ${t}`}
+                    onClick={e => { e.stopPropagation(); setRenaming(t) }}
+                  >
+                    <Edit2 size={11} />
+                  </button>
+                  {api.saveTeamProfile && (
+                    <button
+                      className="btn btn-ghost btn-icon"
+                      style={{ padding: 3, width: 22, height: 22, opacity: 0.55 }}
+                      title="Edit team profile"
+                      onClick={e => { e.stopPropagation(); setEditingProfile(t) }}
+                    >
+                      <Pencil size={11} />
+                    </button>
+                  )}
+                </div>
+              </div>
+              {(profile?.location || profile?.head_coach || profile?.founded) && (
+                <div className="team-card-meta">
+                  {profile.location   && <div className="team-card-meta-row"><MapPin size={10} /><span>{profile.location}</span></div>}
+                  {profile.head_coach && <div className="team-card-meta-row"><User size={10} /><span>{profile.head_coach}</span></div>}
+                  {profile.founded    && <div className="team-card-meta-row"><Calendar size={10} /><span>Est. {profile.founded}</span></div>}
+                </div>
+              )}
+              <hr className="team-card-divider" />
+              <div className="team-card-count">{count}</div>
+              <div className="team-card-breakdown">{mc}M &middot; {fc}F</div>
+              {profile?.description && (
+                <div className="team-card-desc">{profile.description}</div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Toolbar */}
+      <div className="toolbar">
+        <div className="search-bar">
+          <Search size={14} />
+          <input className="input" placeholder="Search by name or #..."
+            value={search} onChange={e => setSearch(e.target.value)} />
+        </div>
+
+        <select className="input filter-select" value={filterGender} onChange={e => setGender(e.target.value)}>
+          <option value="all">All Genders</option>
+          <option value="M">Male</option>
+          <option value="F">Female</option>
+        </select>
+
+        <select className="input filter-select" value={filterAge} onChange={e => setFilterAge(e.target.value)}>
+          <option value="all">All Age Groups</option>
+          <option value="5-6">5–6</option>
+          <option value="7-8">7–8</option>
+          <option value="9-10">9–10</option>
+          <option value="11-12">11–12</option>
+          <option value="13-14">13–14</option>
+          <option value="15-16">15–16</option>
+          <option value="17-18">17–18</option>
+        </select>
+
+        {hasFilters && (
+          <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={clearFilters}>
+            <X size={13} /> Clear
+          </button>
+        )}
+
+        <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-muted)' }}>
+          {filtered.length} result{filtered.length !== 1 ? 's' : ''}
+        </span>
+      </div>
+
+      {/* Table */}
+      <div className="roster-table-wrap">
+        {loading ? (
+          <div className="loading-container"><div className="loading-spinner" /></div>
+        ) : filtered.length === 0 ? (
+          <div className="empty-state">
+            <UserPlus size={44} />
+            <p style={{ fontSize: 14 }}>
+              {hasFilters || filterTeam !== 'all'
+                ? 'No athletes match your filters'
+                : 'No athletes in the roster yet'}
+            </p>
+            {!hasFilters && filterTeam === 'all' && (
+              <button className="btn btn-primary" style={{ marginTop: 8 }} onClick={() => setShowAdd(true)}>
+                <UserPlus size={14} /> Add First Athlete
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="table-container">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Athlete</th>
+                  {multipleTeams && <th>Team</th>}
+                  <th>Gender</th>
+                  <th>Age</th>
+                  <th>Age Group</th>
+                  <th>Date of Birth</th>
+                  <th>#</th>
+                  <th style={{ width: 80, textAlign: 'right' }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(a => (
+                  <tr key={a.id} onClick={() => setViewing(a)} style={{ cursor: 'pointer' }}>
+                    {/* Name + Avatar */}
+                    <td>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div className={`avatar avatar-${a.gender === 'M' ? 'male' : 'female'}`}>
+                          {a.first_name[0]}{a.last_name[0]}
+                        </div>
+                        <span style={{ fontWeight: 500 }}>
+                          {a.last_name}, {a.first_name}
+                        </span>
+                      </div>
+                    </td>
+
+                    {/* Team — only visible when multiple teams exist */}
+                    {multipleTeams && (
+                      <td>
+                        <span className={`badge ${(a.team || HOME_TEAM) === HOME_TEAM ? 'badge-blue' : 'badge-neutral'}`}>
+                          {a.team || HOME_TEAM}
+                        </span>
+                      </td>
+                    )}
+
+                    {/* Gender */}
+                    <td>
+                      <span className={`badge badge-${a.gender === 'M' ? 'blue' : 'gold'}`}>
+                        {a.gender === 'M' ? 'Male' : 'Female'}
+                      </span>
+                    </td>
+
+                    {/* Age */}
+                    <td style={{ fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 600 }}>
+                      {a.age}
+                    </td>
+
+                    {/* Age Group */}
+                    <td><span className="badge badge-neutral">{getAgeGroup(a.age)}</span></td>
+
+                    {/* DOB */}
+                    <td style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
+                      {new Date(a.date_of_birth + 'T00:00:00').toLocaleDateString('en-US', {
+                        month: 'short', day: 'numeric', year: 'numeric',
+                      })}
+                    </td>
+
+                    {/* Athlete # */}
+                    <td style={{ color: 'var(--text-muted)', fontSize: 12, fontFamily: 'monospace' }}>
+                      {a.athlete_number || '—'}
+                    </td>
+
+                    {/* Actions */}
+                    <td>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 4 }}>
+                        <button className="btn btn-ghost btn-icon" onClick={e => { e.stopPropagation(); setEditing(a) }} title="Edit">
+                          <Edit2 size={14} />
+                        </button>
+                        <button className="btn btn-danger btn-icon" onClick={e => { e.stopPropagation(); setDeleting(a) }} title="Remove">
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Modals */}
+      {showAdd  && <AthleteModal                    teams={teams} onSave={handleAdd}  onClose={() => setShowAdd(false)} />}
+      {editing  && <AthleteModal athlete={editing}  teams={teams} onSave={handleEdit} onClose={() => setEditing(null)} />}
+      {deleting && <DeleteModal  athlete={deleting} onConfirm={handleDelete}           onClose={() => setDeleting(null)} />}
+      {renaming && (
+        <RenameTeamModal
+          teamName={renaming}
+          count={countFor(renaming)}
+          onConfirm={handleRenameTeam}
+          onClose={() => setRenaming(null)}
+        />
+      )}
+      {editingProfile && (
+        <TeamProfileModal
+          teamName={editingProfile}
+          profile={teamProfiles[editingProfile]}
+          onSave={handleSaveProfile}
+          onClose={() => setEditingProfile(null)}
+        />
+      )}
+
+      {/* Clear roster confirm */}
+      {clearingRoster && (
+        <ClearRosterModal
+          count={athletes.length}
+          onConfirm={handleClearRoster}
+          onClose={() => setClearingRoster(false)}
+        />
+      )}
+
+      {/* Import preview */}
+      {importAthletes && (
+        <ImportPreviewModal
+          athletes={importAthletes}
+          onConfirm={handleConfirmImport}
+          onClose={() => setImportAthletes(null)}
+        />
+      )}
+
+      {/* Athlete profile panel */}
+      {viewing && (
+        <AthleteProfilePanel
+          athlete={viewing}
+          prs={athletePRs}
+          loading={loadingPRs}
+          onClose={() => setViewing(null)}
+        />
+      )}
+    </div>
+  )
+}

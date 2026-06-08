@@ -1,0 +1,28 @@
+{
+  "name": "pegasus-track",
+  "private": true,
+  "version": "0.4.0",
+  "type": "module",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "electron": "electron .",
+    "postinstall": "node scripts/install-bsql-electron.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.107.0",
+    "lucide-react": "^0.383.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^7.16.0",
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "better-sqlite3": "^12.10.0",
+    "electron": "^33.4.11",
+    "vite": "^5.4.0"
+  }
+}
