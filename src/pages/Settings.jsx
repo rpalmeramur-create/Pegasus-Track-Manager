@@ -450,6 +450,58 @@ function SeasonSection() {
   )
 }
 
+function UpdatesSection() {
+  const [checking, setChecking] = useState(false)
+  const [result, setResult]     = useState(null)
+
+  const handleCheck = async () => {
+    if (!window.electronAPI?.checkForUpdates) {
+      setResult({ error: 'Requires the desktop app.' })
+      return
+    }
+    setChecking(true)
+    setResult(null)
+    const res = await window.electronAPI.checkForUpdates()
+    setChecking(false)
+    setResult(res)
+  }
+
+  return (
+    <div className="settings-section">
+      <div className="settings-section-header">
+        <div>
+          <div className="settings-section-title">Updates</div>
+          <div className="settings-section-sub">
+            Current version: <strong>v0.4.0</strong>
+            {result?.latest && ` · Latest: v${result.latest}`}
+          </div>
+        </div>
+      </div>
+      <div className="settings-fields">
+        {result && !result.error && result.hasUpdate && (
+          <div className="settings-success">
+            Version {result.latest} is available.{' '}
+            <a href={result.releaseUrl} target="_blank" rel="noreferrer"
+               style={{ color: 'var(--accent)' }}>
+              View release <ExternalLink size={11} style={{ verticalAlign: 'middle' }} />
+            </a>
+          </div>
+        )}
+        {result && !result.error && !result.hasUpdate && result.latest && (
+          <div className="settings-success">You're on the latest version ({result.current}).</div>
+        )}
+        {result?.error && (
+          <div className="settings-error">{result.error}</div>
+        )}
+        <button className="btn btn-ghost" onClick={handleCheck} disabled={checking}>
+          <RefreshCw size={13} className={checking ? 'spin' : ''} />
+          {checking ? 'Checking…' : 'Check for Updates'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function DataMaintenanceSection() {
   const [status, setStatus] = useState('idle')
   const [msg, setMsg]       = useState('')
@@ -460,6 +512,13 @@ function DataMaintenanceSection() {
       setStatus('error')
       return
     }
+    const confirmed = window.confirm(
+      'Deduplicate Athletes\n\n' +
+      'This will merge athletes who share the same full name AND date of birth.\n' +
+      'Athletes without a date of birth on file are never merged.\n\n' +
+      'Proceed?'
+    )
+    if (!confirmed) return
     setStatus('working')
     setMsg('')
     const res = await window.electronAPI.deduplicateAthletes()
@@ -467,7 +526,7 @@ function DataMaintenanceSection() {
       setMsg('No duplicates found — roster is clean.')
       setStatus('ok')
     } else {
-      setMsg(`Merged ${res.merged} duplicate athlete record${res.merged !== 1 ? 's' : ''} across ${res.groups} group${res.groups !== 1 ? 's' : ''}.`)
+      setMsg(`Merged ${res.merged} duplicate record${res.merged !== 1 ? 's' : ''} across ${res.groups} group${res.groups !== 1 ? 's' : ''}.`)
       setStatus('ok')
     }
   }
@@ -924,6 +983,9 @@ export default function Settings() {
             </button>
           </div>
         </div>
+
+        {/* ── Updates ── */}
+        <UpdatesSection />
 
         {/* ── Data Maintenance ── */}
         <DataMaintenanceSection />

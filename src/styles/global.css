@@ -751,9 +751,11 @@ textarea.input { resize: vertical; min-height: 72px; }
 .settings-page  { padding-bottom: 48px; }
 
 .settings-body  {
-  padding: 0 32px;
-  display: flex; flex-direction: column; gap: 20px;
-  max-width: 720px;
+  padding: 0 32px 48px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 20px;
+  align-items: start;
 }
 
 .settings-section {

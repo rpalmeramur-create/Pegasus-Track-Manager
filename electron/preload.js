@@ -104,6 +104,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Hy-tek TCL full meet import
   importTCLMeet: (filePath) => ipcRenderer.invoke('import:tclMeet', filePath),
 
+  // Updates
+  checkForUpdates: () => ipcRenderer.invoke('updates:check'),
+
   // Attendance
   attendanceSyncFromEntries: (meetId)       => ipcRenderer.invoke('attendance:syncFromEntries', meetId),
   attendanceGetForMeet:      (meetId)       => ipcRenderer.invoke('attendance:getForMeet',      meetId),

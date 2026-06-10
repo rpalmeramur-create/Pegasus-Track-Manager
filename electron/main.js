@@ -176,11 +176,16 @@ function registerAthleteHandlers() {
   ipcMain.handle('athletes:deduplicate', () => {
     // Find groups sharing the same name+DOB (case-insensitive). Keep the
     // lowest-id athlete in each group; re-point entries then soft-delete dupes.
+    // Require a non-null, non-empty DOB to avoid merging unrelated athletes
+    // who share a common name but have no date of birth on file.
     const dedupFn = db.transaction(() => {
       const groups = db.prepare(`
         SELECT lower(first_name) fn, lower(last_name) ln, date_of_birth dob,
                COUNT(*) cnt, MIN(id) keep_id, GROUP_CONCAT(id) ids
         FROM athletes
+        WHERE active = 1
+          AND date_of_birth IS NOT NULL
+          AND date_of_birth != ''
         GROUP BY lower(first_name), lower(last_name), date_of_birth
         HAVING cnt > 1
       `).all()
@@ -411,6 +416,35 @@ function registerEventHandlers() {
 
 function registerSettingsHandlers() {
   const { readSettings, writeSettings } = require('./settings')
+
+  ipcMain.handle('updates:check', async () => {
+    const https = require('https')
+    const current = app.getVersion()
+    return new Promise(resolve => {
+      const req = https.get(
+        'https://api.github.com/repos/rpalmeramur-create/Pegasus-Track-Manager/releases/latest',
+        { headers: { 'User-Agent': 'pegasus-track-app' } },
+        res => {
+          let body = ''
+          res.on('data', d => { body += d })
+          res.on('end', () => {
+            try {
+              const data = JSON.parse(body)
+              const latest = (data.tag_name || '').replace(/^v/, '')
+              const releaseUrl = data.html_url || ''
+              const hasUpdate = latest && latest !== current &&
+                latest.split('.').map(Number).join('') > current.split('.').map(Number).join('')
+              resolve({ current, latest: latest || null, hasUpdate: !!hasUpdate, releaseUrl, error: null })
+            } catch {
+              resolve({ current, latest: null, hasUpdate: false, releaseUrl: '', error: 'Could not parse release info' })
+            }
+          })
+        }
+      )
+      req.on('error', err => resolve({ current, latest: null, hasUpdate: false, releaseUrl: '', error: err.message }))
+      req.setTimeout(8000, () => { req.destroy(); resolve({ current, latest: null, hasUpdate: false, releaseUrl: '', error: 'Request timed out' }) })
+    })
+  })
 
   ipcMain.handle('settings:get', () => {
     const s = readSettings()
