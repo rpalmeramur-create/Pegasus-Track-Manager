@@ -1,111 +1,85 @@
-# 🏃 Pegasus Track
+# Pegasus Track
 
-Track & Field club management software. Built with Electron + React + SQLite.
-
----
-
-## First-Time Setup
-
-### Prerequisites
-- **Node.js 18+** — download from https://nodejs.org
-- **Windows 11**
-- A terminal: PowerShell or Command Prompt
-
-### Steps
-
-1. Copy the entire `pegasus-track/` folder to wherever you keep projects
-   (e.g., `C:\Users\YourName\Documents\pegasus-track`)
-
-2. Open a terminal and navigate to that folder:
-   ```
-   cd C:\Users\YourName\Documents\pegasus-track
-   ```
-
-3. Install dependencies (this also rebuilds `better-sqlite3` for Electron):
-   ```
-   npm install
-   ```
-   > ⚠️ This step compiles a native database module for Electron.
-   > It takes 2-3 minutes the first time. This is normal.
-
-4. Start the app in development mode:
-   ```
-   npm run dev
-   ```
-   The Pegasus Track window will open automatically.
+Track & field club management software. Built with Electron + React + SQLite. Fully offline.
 
 ---
 
-## Folder Structure
+## Running the App
+
+No installation required. Just download and run the pre-built executable:
 
 ```
-pegasus-track/
-├── package.json              — Dependencies & scripts
-├── vite.config.js            — Vite bundler config
-├── index.html                — HTML entry point
-├── electron/
-│   ├── main.js               — Electron main process + IPC handlers
-│   ├── preload.js            — Secure bridge to renderer
-│   └── database/
-│       └── db.js             — SQLite schema & seed data
-└── src/
-    ├── main.jsx              — React entry
-    ├── App.jsx               — Root app + routing
-    ├── styles/
-    │   └── global.css        — Full design system
-    ├── components/
-    │   └── Sidebar.jsx       — Navigation sidebar
-    └── pages/
-        ├── Dashboard.jsx     — Overview & stats
-        └── Roster.jsx        — Athlete management
+release\win-unpacked\Pegasus Track.exe
 ```
+
+Double-click it and the app opens. Your data is stored locally — nothing goes to the internet.
+
+> **Windows SmartScreen warning?** Click **"More info"** then **"Run anyway"**. This is expected for unsigned apps.
 
 ---
 
-## Where is the database?
+## Where is my data?
 
-Your data is stored locally at:
+All athlete, meet, and results data is stored in a single SQLite file at:
+
 ```
 C:\Users\YourName\AppData\Roaming\pegasus-track\pegasus-track.db
 ```
-It's a standard SQLite file you can back up any time.
+
+Back it up any time by copying that file.
 
 ---
 
-## Scripts
+## Features
 
-| Command         | Description                             |
-|-----------------|-----------------------------------------|
-| `npm run dev`   | Start in development mode               |
-| `npm run build` | Build a distributable Windows installer |
-
----
-
-## Phase 1 — Complete ✅
-
-- Athlete roster (add, edit, remove)
-- Search & filter by name, gender, age group
-- Age auto-calculated from date of birth
-- Dashboard overview with stats
-- Full database schema for all future features
+- Athlete roster with emergency contacts, medical notes, age groups
+- Meet management — events, entries, seeding, results, rankings
+- Heat sheet & results printing (8.5×11 and thermal label formats)
+- Award label printing
+- Records — auto-computed PRs and club records from all results
+- Attendance tracking with per-meet overrides and season confirmation status
+- Season scoring
 - 100% offline — no internet required at meets
 
-## Phase 2 — Coming Next
+---
 
-- Season management
-- Meet creation & configuration
-- Event setup per meet
-- Athlete entry generation
-- Heat sheet printing
+## Developer Setup
 
-## Phase 3
+Only needed if you want to modify the source code and rebuild.
 
-- Seeding engine (time-based, circle seeding)
-- Results entry
-- Timing system integration (FinishLynx, TimeTronics, Daktronics)
+**Prerequisites:** Node.js 18+, Windows 11, PowerShell or Command Prompt
 
-## Phase 4
+```
+npm install
+npm run dev          # development mode (hot reload)
+npm run dist:dir     # build the exe to release\win-unpacked\
+```
 
-- Club records & age group records
-- Season reports
-- PR tracking & history
+> `npm install` compiles a native SQLite module for Electron — takes 2–3 minutes the first time.
+
+### Folder structure
+
+```
+pegasus-track/
+├── electron/
+│   ├── main.js          — Main process + all IPC handlers
+│   ├── preload.js       — Secure renderer bridge
+│   ├── settings.js      — App settings (JSON file)
+│   └── database/
+│       └── db.js        — SQLite schema & migrations
+└── src/
+    ├── App.jsx           — Root app + routing
+    ├── SettingsContext.jsx
+    ├── components/
+    │   ├── Sidebar.jsx
+    │   └── PrintAwardLabels.jsx
+    └── pages/
+        ├── Dashboard.jsx
+        ├── Roster.jsx
+        ├── Meets.jsx
+        ├── Results.jsx
+        ├── Records.jsx
+        ├── Attendance.jsx
+        ├── Scores.jsx
+        └── Settings.jsx
+```
