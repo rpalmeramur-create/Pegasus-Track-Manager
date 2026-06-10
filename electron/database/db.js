@@ -140,6 +140,18 @@ module.exports = function initSchema(db) {
   const hasTeam = db.prepare("SELECT 1 FROM pragma_table_info('athletes') WHERE name='team'").get()
   if (!hasTeam) db.exec("ALTER TABLE athletes ADD COLUMN team TEXT NOT NULL DEFAULT 'Pegasus Track'")
 
+  // ─── Migration: custom & adaptive flags on tf_events ─────────
+  for (const col of ['is_custom','is_adaptive']) {
+    const has = db.prepare(`SELECT 1 FROM pragma_table_info('tf_events') WHERE name='${col}'`).get()
+    if (!has) db.exec(`ALTER TABLE tf_events ADD COLUMN ${col} INTEGER DEFAULT 0`)
+  }
+
+  // ─── Migration: emergency contacts & medical notes ────────────
+  for (const col of ['ec1_name','ec1_rel','ec1_ph','ec1_ph2','ec2_name','ec2_rel','ec2_ph','medical']) {
+    const has = db.prepare(`SELECT 1 FROM pragma_table_info('athletes') WHERE name='${col}'`).get()
+    if (!has) db.exec(`ALTER TABLE athletes ADD COLUMN ${col} TEXT`)
+  }
+
   // ─── Migration: team_profiles table ──────────────────────────
   db.exec(`
     CREATE TABLE IF NOT EXISTS team_profiles (
@@ -167,6 +179,118 @@ module.exports = function initSchema(db) {
 
   const hasIsPr = db.prepare("SELECT 1 FROM pragma_table_info('results') WHERE name='is_pr'").get()
   if (!hasIsPr) db.exec("ALTER TABLE results ADD COLUMN is_pr INTEGER DEFAULT 0")
+
+  // ─── Migration: update meets CHECK constraints ──────────────
+  // Adds 'runathon' to type CHECK and 'in_progress' to status CHECK
+  const meetsSchema = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='meets'").get()
+  if (meetsSchema && !meetsSchema.sql.includes("'runathon'")) {
+    db.pragma('foreign_keys = OFF')
+    db.exec(`
+      CREATE TABLE meets_v2 (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        season_id  INTEGER REFERENCES seasons(id),
+        name       TEXT    NOT NULL,
+        date       TEXT    NOT NULL,
+        location   TEXT,
+        host       TEXT,
+        type       TEXT    DEFAULT 'invitational'
+                           CHECK(type IN ('home','away','invitational','dual','championship','runathon')),
+        status     TEXT    DEFAULT 'upcoming'
+                           CHECK(status IN ('upcoming','active','in_progress','completed','cancelled')),
+        notes      TEXT,
+        created_at TEXT    DEFAULT (datetime('now'))
+      );
+      INSERT INTO meets_v2 (id, season_id, name, date, location, host, type, status, notes, created_at)
+        SELECT id, season_id, name, date, location, host, type, status, notes, created_at FROM meets;
+      DROP TABLE meets;
+      ALTER TABLE meets_v2 RENAME TO meets;
+    `)
+    db.pragma('foreign_keys = ON')
+  }
+
+  // ─── Run-a-thon participant entries ──────────────────────────
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS runathon_entries (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      meet_id         INTEGER NOT NULL REFERENCES meets(id) ON DELETE CASCADE,
+      athlete_id      INTEGER REFERENCES athletes(id),
+      guest_name      TEXT,
+      guest_team      TEXT,
+      laps            REAL,
+      best_distance   TEXT,
+      pledge_per_lap  REAL,
+      flat_pledges    REAL,
+      notes           TEXT,
+      created_at      TEXT DEFAULT (datetime('now')),
+      UNIQUE(meet_id, athlete_id)
+    )
+  `)
+
+  // ─── Migration: pledge columns on existing runathon_entries ──
+  const hasPledgePerLap = db.prepare("SELECT 1 FROM pragma_table_info('runathon_entries') WHERE name='pledge_per_lap'").get()
+  if (!hasPledgePerLap) db.exec("ALTER TABLE runathon_entries ADD COLUMN pledge_per_lap REAL")
+  const hasFlatPledges = db.prepare("SELECT 1 FROM pragma_table_info('runathon_entries') WHERE name='flat_pledges'").get()
+  if (!hasFlatPledges) db.exec("ALTER TABLE runathon_entries ADD COLUMN flat_pledges REAL")
+
+  // ─── Relay leg assignments ───────────────────────────────────
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS relay_legs (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      entry_id   INTEGER NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+      leg        INTEGER NOT NULL CHECK(leg IN (1,2,3,4)),
+      athlete_id INTEGER REFERENCES athletes(id),
+      UNIQUE(entry_id, leg)
+    )
+  `)
+
+  // ─── Records (club & open meet all-time bests) ──────────────
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS records (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      scope          TEXT NOT NULL CHECK(scope IN ('club','open')),
+      event_name     TEXT NOT NULL,
+      event_category TEXT NOT NULL,
+      gender         TEXT NOT NULL DEFAULT 'M',
+      age_group      TEXT NOT NULL DEFAULT '',
+      mark           TEXT NOT NULL,
+      mark_value     REAL,
+      wind           TEXT,
+      athlete_name   TEXT,
+      athlete_id     INTEGER REFERENCES athletes(id),
+      team           TEXT,
+      meet_name      TEXT,
+      meet_id        INTEGER REFERENCES meets(id),
+      meet_date      TEXT,
+      notes          TEXT,
+      is_auto        INTEGER DEFAULT 0,
+      created_at     TEXT DEFAULT (datetime('now')),
+      updated_at     TEXT DEFAULT (datetime('now'))
+    )
+  `)
+
+  // ─── Meet templates ─────────────────────────────────────────
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS meet_templates (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      name        TEXT    NOT NULL,
+      events_json TEXT    NOT NULL,
+      created_at  TEXT    DEFAULT (datetime('now'))
+    )
+  `)
+
+  // ─── Attendance ──────────────────────────────────────────────
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS attendance (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      athlete_id  INTEGER NOT NULL REFERENCES athletes(id),
+      meet_id     INTEGER NOT NULL REFERENCES meets(id),
+      present     INTEGER NOT NULL DEFAULT 1,
+      is_override INTEGER NOT NULL DEFAULT 0,
+      notes       TEXT,
+      created_at  TEXT DEFAULT (datetime('now')),
+      UNIQUE(athlete_id, meet_id)
+    )
+  `)
 
   // ─── Standard event catalogue (single source of truth) ──────
   const STANDARD_EVENTS = [

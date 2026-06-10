@@ -2,6 +2,8 @@
   "name": "pegasus-track",
   "private": true,
   "version": "0.4.0",
+  "description": "Club management app for Pegasus Track",
+  "author": "Pegasus Track",
   "type": "module",
   "main": "electron/main.js",
   "scripts": {
@@ -9,10 +11,14 @@
     "build": "vite build",
     "preview": "vite preview",
     "electron": "electron .",
-    "postinstall": "node scripts/install-bsql-electron.js"
+    "dist": "vite build && electron-builder --win --x64",
+    "dist:dir": "vite build && electron-builder --win --dir",
+    "postinstall": "node scripts/install-bsql-electron.cjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.107.0",
+    "better-sqlite3": "^12.10.0",
+    "electron-updater": "^6.3.0",
     "lucide-react": "^0.383.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -21,8 +27,46 @@
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.1",
-    "better-sqlite3": "^12.10.0",
     "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
     "vite": "^5.4.0"
+  },
+  "build": {
+    "appId": "com.pegasustrack.app",
+    "productName": "Pegasus Track",
+    "copyright": "Copyright © 2026 Pegasus Track",
+    "directories": {
+      "buildResources": "assets",
+      "output": "release"
+    },
+    "npmRebuild": false,
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "**/better-sqlite3/**/*"
+    ],
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ],
+      "artifactName": "${productName} Setup ${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Pegasus Track",
+      "deleteAppDataOnUninstall": false
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "REPLACE_WITH_GITHUB_USERNAME",
+      "repo": "pegasus-track"
+    }
   }
 }

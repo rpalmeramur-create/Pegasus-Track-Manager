@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react'
-import { Cloud, CheckCircle, AlertCircle, RefreshCw, Eye, EyeOff, ExternalLink, Plus, X, Zap } from 'lucide-react'
+import { Cloud, CheckCircle, AlertCircle, RefreshCw, Eye, EyeOff, ExternalLink, Plus, X, Zap, Palette, Pencil } from 'lucide-react'
+import { THEMES, getSavedTheme, applyTheme } from '../theme.js'
+import { getAutoPrint, setAutoPrint } from '../printPrefs.js'
 
 // ─── Status Badge ─────────────────────────────────────────────
 function StatusBadge({ status }) {
@@ -19,8 +21,312 @@ function StatusBadge({ status }) {
   )
 }
 
+// ─── Appearance Section ───────────────────────────────────
+function AppearanceSection() {
+  const [active, setActive] = useState(getSavedTheme)
+
+  const handleSelect = (id) => {
+    applyTheme(id)
+    setActive(id)
+  }
+
+  return (
+    <div className="settings-section">
+      <div className="settings-section-header">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Palette size={16} style={{ color: 'var(--accent)' }} />
+          <div>
+            <div className="settings-section-title">Appearance</div>
+            <div className="settings-section-sub">Choose a color theme for the application.</div>
+          </div>
+        </div>
+      </div>
+      <div className="settings-fields">
+        <div className="theme-picker">
+          {THEMES.map(t => (
+            <button
+              key={t.id}
+              className={`theme-card${active === t.id ? ' active' : ''}`}
+              onClick={() => handleSelect(t.id)}
+              title={t.label}
+            >
+              <div className="theme-card-preview" style={{ background: t.bg }}>
+                {active === t.id
+                  ? <CheckCircle size={18} style={{ color: t.accent }} />
+                  : <div className="theme-card-dot" style={{ background: t.accent }} />
+                }
+              </div>
+              <div className="theme-card-label">{t.label}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Season Management Section ────────────────────────────
+// ─── Club Info Section ────────────────────────────────────
+function ClubInfoSection({ form, setForm }) {
+  const [saved, setSaved] = useState(false)
+
+  const handleSave = async () => {
+    await window.electronAPI?.saveSettings({
+      homeTeam: form.homeTeam,
+      attendanceThreshold: Number(form.attendanceThreshold) || 3,
+    })
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2500)
+  }
+
+  return (
+    <div className="settings-section">
+      <div className="settings-section-header">
+        <div>
+          <div className="settings-section-title">Club Information</div>
+          <div className="settings-section-sub">
+            Configure club name and season confirmation rules.
+          </div>
+        </div>
+      </div>
+      <div className="settings-fields">
+        <div className="form-group" style={{ margin: 0 }}>
+          <label className="form-label">Club / Team Name</label>
+          <input className="input" value={form.homeTeam}
+            onChange={e => setForm({ homeTeam: e.target.value })}
+            placeholder="e.g. Pegasus Track" style={{ maxWidth: 320 }} />
+          <span className="form-hint">
+            Athletes with this team name are counted as club members for Records.
+          </span>
+        </div>
+        <div className="form-group" style={{ margin: 0 }}>
+          <label className="form-label">Season Confirmation Threshold</label>
+          <input className="input" type="number" min={1} max={50}
+            value={form.attendanceThreshold ?? 3}
+            onChange={e => setForm({ attendanceThreshold: e.target.value })}
+            style={{ maxWidth: 100 }} />
+          <span className="form-hint">
+            Minimum number of meets an athlete must attend to have their season confirmed.
+          </span>
+        </div>
+        {saved && <div className="settings-success">Saved.</div>}
+        <button className="btn btn-primary" style={{ alignSelf: 'flex-start' }}
+          onClick={handleSave}>Save</button>
+      </div>
+    </div>
+  )
+}
+
 const TYPE_LABELS = { outdoor: 'Outdoor', indoor: 'Indoor', cross_country: 'Cross Country' }
+
+// ─── Custom Events ────────────────────────────────────────────
+function CustomEventModal({ event, onSave, onClose }) {
+  const [form, setForm] = useState({
+    name:             event?.name             ?? '',
+    abbreviation:     event?.abbreviation     ?? '',
+    category:         event?.category         ?? 'track',
+    measurement_unit: event?.measurement_unit ?? 'time',
+    is_relay:         event?.is_relay         ?? 0,
+    is_adaptive:      event?.is_adaptive      ?? 0,
+  })
+  const [saving, setSaving] = useState(false)
+  const [error,  setError]  = useState('')
+
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+
+  const handleSave = async () => {
+    if (!form.name.trim()) { setError('Event name is required'); return }
+    setSaving(true)
+    try {
+      await onSave({ ...form, is_relay: form.is_relay ? 1 : 0, is_adaptive: form.is_adaptive ? 1 : 0 })
+    } catch (e) { setError(e.message || 'Save failed'); setSaving(false) }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal">
+        <div className="modal-header">
+          <div className="modal-title">{event?.id ? 'Edit Custom Event' : 'New Custom Event'}</div>
+          <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={15} /></button>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div className="form-group">
+            <label className="form-label">Event Name <span style={{ color: 'var(--red)' }}>*</span></label>
+            <input className="input" value={form.name} autoFocus
+              onChange={e => { set('name', e.target.value); setError('') }}
+              placeholder="e.g. Wheelchair 100m Dash" />
+            {error && <span className="form-error">{error}</span>}
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Abbreviation <span style={{ color: 'var(--text-muted)', textTransform: 'none', letterSpacing: 0 }}>Optional</span></label>
+            <input className="input" value={form.abbreviation}
+              onChange={e => set('abbreviation', e.target.value)}
+              placeholder="e.g. WC100m" />
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <div className="form-group">
+              <label className="form-label">Category</label>
+              <select className="input" value={form.category} onChange={e => set('category', e.target.value)}>
+                <option value="track">Track</option>
+                <option value="field">Field</option>
+                <option value="relay">Relay</option>
+                <option value="combined">Combined</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Measurement</label>
+              <select className="input" value={form.measurement_unit} onChange={e => set('measurement_unit', e.target.value)}>
+                <option value="time">Time</option>
+                <option value="distance">Distance</option>
+                <option value="points">Points</option>
+              </select>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 24 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
+              <input type="checkbox" checked={!!form.is_relay}
+                onChange={e => set('is_relay', e.target.checked ? 1 : 0)} />
+              Relay event (4 athletes)
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
+              <input type="checkbox" checked={!!form.is_adaptive}
+                onChange={e => set('is_adaptive', e.target.checked ? 1 : 0)} />
+              Adaptive / Para
+            </label>
+          </div>
+        </div>
+
+        <div className="modal-footer">
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+            {saving ? 'Saving…' : event?.id ? 'Save Changes' : 'Create Event'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function CustomEventsSection() {
+  const [events,   setEvents]   = useState([])
+  const [showModal, setShowModal] = useState(false)
+  const [editing,  setEditing]  = useState(null)
+  const [deleting, setDeleting] = useState(null)
+  const [deleteErr, setDeleteErr] = useState('')
+
+  const load = () => {
+    if (!window.electronAPI?.getTfEvents) return
+    window.electronAPI.getTfEvents()
+      .then(evs => setEvents(evs.filter(e => e.is_custom)))
+      .catch(() => {})
+  }
+
+  useEffect(() => { load() }, [])
+
+  const handleSave = async (form) => {
+    if (editing?.id) {
+      await window.electronAPI.updateTfEvent(editing.id, form)
+    } else {
+      await window.electronAPI.createTfEvent(form)
+    }
+    setShowModal(false)
+    setEditing(null)
+    load()
+  }
+
+  const handleDelete = async () => {
+    const r = await window.electronAPI.deleteTfEvent(deleting.id)
+    if (!r.success) { setDeleteErr(r.error); return }
+    setDeleting(null)
+    setDeleteErr('')
+    load()
+  }
+
+  const CAT_COLOR = { track: 'var(--accent)', relay: '#a78bfa', field: '#34d399', combined: '#f59e0b' }
+
+  return (
+    <div className="settings-section">
+      <div className="settings-section-header">
+        <div>
+          <div className="settings-section-title">Custom Events</div>
+          <div className="settings-section-sub">
+            Add non-standard events — adaptive, wheelchair, novelty — to the meet catalogue.
+            Custom events appear alongside standard ones when setting up a meet.
+          </div>
+        </div>
+        <button className="btn btn-primary" style={{ fontSize: 12 }}
+          onClick={() => { setEditing(null); setShowModal(true) }}>
+          <Plus size={13} style={{ marginRight: 4 }} />New Event
+        </button>
+      </div>
+
+      {events.length === 0 ? (
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 10 }}>
+          No custom events yet. Standard events are always available.
+        </p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 12 }}>
+          {events.map(ev => (
+            <div key={ev.id} style={{
+              display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
+              background: 'var(--bg-tertiary)', borderRadius: 6, border: '1px solid var(--border)',
+            }}>
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+                <span style={{ fontWeight: 500, fontSize: 13 }}>{ev.name}</span>
+                {ev.abbreviation && (
+                  <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>({ev.abbreviation})</span>
+                )}
+                <span className="badge badge-neutral" style={{ fontSize: 10, color: CAT_COLOR[ev.category], textTransform: 'capitalize' }}>
+                  {ev.category}
+                </span>
+                {ev.is_adaptive ? <span className="badge badge-blue" style={{ fontSize: 10 }}>Adaptive</span> : null}
+                {ev.is_relay    ? <span className="badge badge-neutral" style={{ fontSize: 10 }}>Relay</span> : null}
+              </div>
+              <button className="btn btn-ghost btn-icon" title="Edit"
+                onClick={() => { setEditing(ev); setShowModal(true) }}>
+                <Pencil size={13} />
+              </button>
+              <button className="btn btn-danger btn-icon" title="Delete"
+                onClick={() => { setDeleting(ev); setDeleteErr('') }}>
+                <X size={13} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {showModal && (
+        <CustomEventModal
+          event={editing}
+          onSave={handleSave}
+          onClose={() => { setShowModal(false); setEditing(null) }}
+        />
+      )}
+
+      {deleting && (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setDeleting(null)}>
+          <div className="modal" style={{ maxWidth: 380 }}>
+            <div className="modal-header">
+              <div className="modal-title">Delete Custom Event</div>
+            </div>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: deleteErr ? 8 : 0 }}>
+              Delete "<strong>{deleting.name}</strong>"? This cannot be undone.
+            </p>
+            {deleteErr && <p style={{ fontSize: 12, color: 'var(--red)', margin: '8px 0 0' }}>{deleteErr}</p>}
+            <div className="modal-footer">
+              <button className="btn btn-ghost" onClick={() => { setDeleting(null); setDeleteErr('') }}>Cancel</button>
+              <button className="btn btn-danger" onClick={handleDelete}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 function SeasonSection() {
   const [seasons,      setSeasons]      = useState([])
@@ -144,10 +450,52 @@ function SeasonSection() {
   )
 }
 
+function DataMaintenanceSection() {
+  const [status, setStatus] = useState('idle')
+  const [msg, setMsg]       = useState('')
+
+  const handleDedup = async () => {
+    if (!window.electronAPI?.deduplicateAthletes) {
+      setMsg('Requires the desktop app.')
+      setStatus('error')
+      return
+    }
+    setStatus('working')
+    setMsg('')
+    const res = await window.electronAPI.deduplicateAthletes()
+    if (res.groups === 0) {
+      setMsg('No duplicates found — roster is clean.')
+      setStatus('ok')
+    } else {
+      setMsg(`Merged ${res.merged} duplicate athlete record${res.merged !== 1 ? 's' : ''} across ${res.groups} group${res.groups !== 1 ? 's' : ''}.`)
+      setStatus('ok')
+    }
+  }
+
+  return (
+    <div className="settings-section">
+      <div className="settings-section-header">
+        <div>
+          <div className="settings-section-title">Data Maintenance</div>
+          <div className="settings-section-sub">
+            Clean up duplicate athletes created during imports.
+          </div>
+        </div>
+      </div>
+      <div className="settings-fields">
+        {msg && <div className={status === 'ok' ? 'settings-success' : 'settings-error'}>{msg}</div>}
+        <button className="btn btn-ghost" onClick={handleDedup} disabled={status === 'working'}>
+          {status === 'working' ? 'Scanning…' : 'Deduplicate Athletes'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export default function Settings() {
   const [form, setForm] = useState({
     supabaseUrl: '', supabaseAnonKey: '', supabaseServiceKey: '', parentEmail: '', parentPassword: '',
-    claudeApiKey: '', labelPrinter: '', sheetPrinter: '',
+    claudeApiKey: '', labelPrinter: '', sheetPrinter: '', homeTeam: 'Pegasus Track', attendanceThreshold: 3,
   })
   const [showKey, setShowKey]           = useState(false)
   const [showClaudeKey, setShowClaudeKey] = useState(false)
@@ -162,6 +510,7 @@ export default function Settings() {
   const [hasClaudeKey, setHasClaudeKey] = useState(false)
   const [printers, setPrinters]         = useState([])
   const [printerSaved, setPrinterSaved] = useState(false)
+  const [autoPrint,  setAutoPrintState] = useState(() => getAutoPrint())
   const [loading, setLoading]           = useState(true)
 
   useEffect(() => {
@@ -177,6 +526,8 @@ export default function Settings() {
         parentEmail:     s.parentEmail     || '',
         labelPrinter:    s.labelPrinter    || '',
         sheetPrinter:    s.sheetPrinter    || '',
+        homeTeam:             s.homeTeam             || 'Pegasus Track',
+        attendanceThreshold:  s.attendanceThreshold  ?? 3,
       }))
       setHasClaudeKey(!!s.hasClaudeKey)
       setPrinters(p)
@@ -293,8 +644,17 @@ export default function Settings() {
 
       <div className="settings-body">
 
+        {/* ── Appearance ── */}
+        <AppearanceSection />
+
+        {/* ── Club Info ── */}
+        <ClubInfoSection form={form} setForm={f => setForm(prev => ({ ...prev, ...f }))} />
+
         {/* ── Seasons ── */}
         <SeasonSection />
+
+        {/* ── Custom Events ── */}
+        <CustomEventsSection />
 
         {/* ── Print Settings ── */}
         <div className="settings-section">
@@ -342,6 +702,20 @@ export default function Settings() {
                   ))}
                 </select>
                 <span className="form-hint">Regular paper printer for 8.5″ × 11″ sheets.</span>
+              </div>
+            </div>
+
+            <div className="settings-toggle-row">
+              <label className="toggle-switch">
+                <input type="checkbox" checked={autoPrint}
+                  onChange={e => { setAutoPrintState(e.target.checked); setAutoPrint(e.target.checked) }} />
+                <span className="toggle-track" />
+              </label>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', marginBottom: 2 }}>Direct Print</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  Skip the print preview and send directly to the configured printer (or PDF if none is set).
+                </div>
               </div>
             </div>
 
@@ -550,6 +924,9 @@ export default function Settings() {
             </button>
           </div>
         </div>
+
+        {/* ── Data Maintenance ── */}
+        <DataMaintenanceSection />
 
         {/* ── Portal Info ── */}
         <div className="settings-section settings-section-info">

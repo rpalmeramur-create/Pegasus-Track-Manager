@@ -7,20 +7,30 @@ import {
   CalendarDays,
   Trophy,
   BarChart2,
+  TrendingUp,
+  ClipboardList,
   Settings,
 } from 'lucide-react'
 import AppLogo from './AppLogo.jsx'
+import { useSettings } from '../SettingsContext.jsx'
 
 const NAV_ITEMS = [
-  { to: '/',         icon: LayoutDashboard, label: 'Dashboard', exact: true },
-  { to: '/roster',   icon: Users,           label: 'Teams' },
-  { to: '/meets',    icon: Flag,            label: 'Meets' },
-  { to: '/calendar', icon: CalendarDays,    label: 'Calendar' },
-  { to: '/results',  icon: Trophy,          label: 'Results' },
-  { to: '/records',  icon: BarChart2,       label: 'Records' },
+  { to: '/',           icon: LayoutDashboard, label: 'Dashboard',  exact: true },
+  { to: '/roster',     icon: Users,           label: 'Teams' },
+  { to: '/meets',      icon: Flag,            label: 'Meets' },
+  { to: '/calendar',   icon: CalendarDays,    label: 'Calendar' },
+  { to: '/results',    icon: Trophy,          label: 'Results' },
+  { to: '/records',    icon: BarChart2,       label: 'Records' },
+  { to: '/scores',     icon: TrendingUp,      label: 'Scores' },
+  { to: '/attendance', icon: ClipboardList,   label: 'Attendance' },
 ]
 
 export default function Sidebar() {
+  const { homeTeam } = useSettings()
+  const [org, sub] = homeTeam.includes(' ')
+    ? [homeTeam.split(' ').slice(0, -1).join(' '), homeTeam.split(' ').slice(-1)[0]]
+    : [homeTeam, '']
+
   return (
     <aside className="sidebar">
       {/* Logo */}
@@ -29,8 +39,8 @@ export default function Sidebar() {
           <AppLogo size={22} />
         </div>
         <div>
-          <div className="sidebar-logo-name">PEGASUS</div>
-          <div className="sidebar-logo-sub">TRACK</div>
+          <div className="sidebar-logo-name">{org.toUpperCase()}</div>
+          {sub && <div className="sidebar-logo-sub">{sub.toUpperCase()}</div>}
         </div>
       </div>
 
@@ -62,7 +72,7 @@ export default function Sidebar() {
           <Settings size={16} strokeWidth={1.75} />
           <span>Settings</span>
         </NavLink>
-        <div className="sidebar-version">Pegasus Track v0.1.0</div>
+        <div className="sidebar-version">v0.4.0</div>
       </div>
     </aside>
   )

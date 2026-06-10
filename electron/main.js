@@ -91,6 +91,8 @@ function registerAthleteHandlers() {
     return db.prepare(`
       SELECT id, first_name, last_name, date_of_birth, gender,
         athlete_number, team, notes, active, created_at,
+        ec1_name, ec1_rel, ec1_ph, ec1_ph2,
+        ec2_name, ec2_rel, ec2_ph, medical,
         CAST((julianday('now') - julianday(date_of_birth)) / 365.25 AS INTEGER) AS age
       FROM athletes WHERE active = 1 ORDER BY team, last_name, first_name
     `).all()
@@ -105,14 +107,20 @@ function registerAthleteHandlers() {
 
   ipcMain.handle('athletes:create', (_, data) => {
     const result = db.prepare(`
-      INSERT INTO athletes (first_name, last_name, date_of_birth, gender, athlete_number, team, notes)
-      VALUES (@first_name, @last_name, @date_of_birth, @gender, @athlete_number, @team, @notes)
+      INSERT INTO athletes (first_name, last_name, date_of_birth, gender, athlete_number, team, notes,
+        ec1_name, ec1_rel, ec1_ph, ec1_ph2, ec2_name, ec2_rel, ec2_ph, medical)
+      VALUES (@first_name, @last_name, @date_of_birth, @gender, @athlete_number, @team, @notes,
+        @ec1_name, @ec1_rel, @ec1_ph, @ec1_ph2, @ec2_name, @ec2_rel, @ec2_ph, @medical)
     `).run({
       first_name: data.first_name, last_name: data.last_name,
       date_of_birth: data.date_of_birth, gender: data.gender,
       athlete_number: data.athlete_number || null,
       team: data.team || 'Pegasus Track',
       notes: data.notes || null,
+      ec1_name: data.ec1_name || null, ec1_rel: data.ec1_rel || null,
+      ec1_ph:   data.ec1_ph   || null, ec1_ph2: data.ec1_ph2 || null,
+      ec2_name: data.ec2_name || null, ec2_rel: data.ec2_rel || null,
+      ec2_ph:   data.ec2_ph   || null, medical: data.medical || null,
     })
     return db.prepare(`
       SELECT *, CAST((julianday('now') - julianday(date_of_birth)) / 365.25 AS INTEGER) AS age
@@ -124,13 +132,20 @@ function registerAthleteHandlers() {
     db.prepare(`
       UPDATE athletes SET first_name=@first_name, last_name=@last_name,
         date_of_birth=@date_of_birth, gender=@gender,
-        athlete_number=@athlete_number, team=@team, notes=@notes, updated_at=datetime('now')
+        athlete_number=@athlete_number, team=@team, notes=@notes,
+        ec1_name=@ec1_name, ec1_rel=@ec1_rel, ec1_ph=@ec1_ph, ec1_ph2=@ec1_ph2,
+        ec2_name=@ec2_name, ec2_rel=@ec2_rel, ec2_ph=@ec2_ph, medical=@medical,
+        updated_at=datetime('now')
       WHERE id=@id
     `).run({
       ...data,
       athlete_number: data.athlete_number || null,
       team: data.team || 'Pegasus Track',
       notes: data.notes || null,
+      ec1_name: data.ec1_name || null, ec1_rel: data.ec1_rel || null,
+      ec1_ph:   data.ec1_ph   || null, ec1_ph2: data.ec1_ph2 || null,
+      ec2_name: data.ec2_name || null, ec2_rel: data.ec2_rel || null,
+      ec2_ph:   data.ec2_ph   || null, medical: data.medical || null,
       id,
     })
     return db.prepare(`
@@ -158,6 +173,47 @@ function registerAthleteHandlers() {
     return { success: true, count: result.changes }
   })
 
+  ipcMain.handle('athletes:deduplicate', () => {
+    // Find groups sharing the same name+DOB (case-insensitive). Keep the
+    // lowest-id athlete in each group; re-point entries then soft-delete dupes.
+    const dedupFn = db.transaction(() => {
+      const groups = db.prepare(`
+        SELECT lower(first_name) fn, lower(last_name) ln, date_of_birth dob,
+               COUNT(*) cnt, MIN(id) keep_id, GROUP_CONCAT(id) ids
+        FROM athletes
+        GROUP BY lower(first_name), lower(last_name), date_of_birth
+        HAVING cnt > 1
+      `).all()
+
+      let merged = 0
+      const updateEntry  = db.prepare('UPDATE entries SET athlete_id=? WHERE athlete_id=?')
+      const updatePR     = db.prepare('UPDATE OR IGNORE personal_records SET athlete_id=? WHERE athlete_id=?')
+      const softDelete   = db.prepare("UPDATE athletes SET active=0, updated_at=datetime('now') WHERE id=?")
+
+      for (const g of groups) {
+        const dupeIds = g.ids.split(',').map(Number).filter(id => id !== g.keep_id)
+        for (const dupeId of dupeIds) {
+          updateEntry.run(g.keep_id, dupeId)
+          updatePR.run(g.keep_id, dupeId)
+          softDelete.run(dupeId)
+          merged++
+        }
+        // Make sure the kept athlete has the home-team name if it is a Pegasus athlete
+        const kept = db.prepare('SELECT team FROM athletes WHERE id=?').get(g.keep_id)
+        if (kept && /pegasus track club/i.test(kept.team)) {
+          const homeRow = db.prepare(
+            `SELECT team FROM athletes WHERE active=1 AND lower(team) LIKE '%pegasus%' AND id!=? ORDER BY id LIMIT 1`
+          ).get(g.keep_id)
+          const homeName = homeRow?.team || 'Pegasus Track'
+          db.prepare("UPDATE athletes SET team=? WHERE id=?").run(homeName, g.keep_id)
+        }
+      }
+
+      return { merged, groups: groups.length }
+    })
+    return dedupFn()
+  })
+
   ipcMain.handle('athletes:getPRs', (_, athleteId) => {
     return db.prepare(`
       SELECT pr.mark, pr.indoor, pr.updated_at,
@@ -167,6 +223,69 @@ function registerAthleteHandlers() {
       WHERE pr.athlete_id = ?
       ORDER BY e.sort_order
     `).all(athleteId)
+  })
+
+  ipcMain.handle('athletes:getProfile', (_, athleteId) => {
+    const prs = db.prepare(`
+      SELECT pr.mark, pr.indoor, pr.date, pr.updated_at,
+        tfe.name AS event_name, tfe.abbreviation, tfe.category,
+        tfe.measurement_unit, tfe.sort_order,
+        m.name AS meet_name, m.date AS meet_date
+      FROM personal_records pr
+      JOIN tf_events tfe ON pr.tf_event_id = tfe.id
+      LEFT JOIN meets m ON pr.meet_id = m.id
+      WHERE pr.athlete_id = ?
+      ORDER BY tfe.sort_order
+    `).all(athleteId)
+
+    const rows = db.prepare(`
+      SELECT r.mark, r.place, r.is_pr, r.wind,
+        tfe.name AS event_name, tfe.abbreviation, tfe.category, tfe.measurement_unit,
+        m.id AS meet_id, m.name AS meet_name, m.date AS meet_date, m.type AS meet_type
+      FROM results r
+      JOIN entries e ON r.entry_id = e.id
+      JOIN meet_events me ON e.meet_event_id = me.id
+      JOIN tf_events tfe ON me.tf_event_id = tfe.id
+      JOIN meets m ON me.meet_id = m.id
+      WHERE e.athlete_id = ?
+        AND r.mark IS NOT NULL AND r.mark != ''
+        AND (r.disqualified IS NULL OR r.disqualified = 0)
+        AND (r.did_not_start IS NULL OR r.did_not_start = 0)
+        AND (r.did_not_finish IS NULL OR r.did_not_finish = 0)
+      ORDER BY m.date DESC, tfe.sort_order
+    `).all(athleteId)
+
+    const meetMap = new Map()
+    for (const row of rows) {
+      if (!meetMap.has(row.meet_id)) {
+        meetMap.set(row.meet_id, {
+          meet_id: row.meet_id,
+          meet_name: row.meet_name,
+          meet_date: row.meet_date,
+          meet_type: row.meet_type,
+          results: [],
+        })
+      }
+      meetMap.get(row.meet_id).results.push({
+        event_name: row.event_name,
+        abbreviation: row.abbreviation,
+        category: row.category,
+        measurement_unit: row.measurement_unit,
+        mark: row.mark,
+        place: row.place,
+        is_pr: row.is_pr,
+        wind: row.wind,
+      })
+    }
+
+    const history = Array.from(meetMap.values())
+    const stats = {
+      meets: history.length,
+      events: new Set(rows.map(r => r.event_name)).size,
+      prs: prs.length,
+    }
+
+    return { prs, history, stats }
   })
 }
 
@@ -241,8 +360,49 @@ function registerSeasonHandlers() {
 
 function registerEventHandlers() {
   ipcMain.handle('tfEvents:getAll', () =>
-    db.prepare('SELECT * FROM tf_events ORDER BY sort_order').all()
+    db.prepare('SELECT * FROM tf_events ORDER BY is_custom, sort_order, name').all()
   )
+
+  ipcMain.handle('tfEvents:create', (_, data) => {
+    const maxOrder = db.prepare('SELECT MAX(sort_order) AS m FROM tf_events WHERE is_custom=1').get().m ?? 9000
+    const result = db.prepare(`
+      INSERT INTO tf_events (name, abbreviation, category, measurement_unit, is_relay, is_adaptive, is_custom, sort_order)
+      VALUES (@name, @abbreviation, @category, @measurement_unit, @is_relay, @is_adaptive, 1, @sort_order)
+    `).run({
+      name:             data.name.trim(),
+      abbreviation:     data.abbreviation?.trim() || null,
+      category:         data.category         || 'track',
+      measurement_unit: data.measurement_unit || 'time',
+      is_relay:         data.is_relay         ? 1 : 0,
+      is_adaptive:      data.is_adaptive      ? 1 : 0,
+      sort_order:       maxOrder + 1,
+    })
+    return db.prepare('SELECT * FROM tf_events WHERE id=?').get(result.lastInsertRowid)
+  })
+
+  ipcMain.handle('tfEvents:update', (_, id, data) => {
+    db.prepare(`
+      UPDATE tf_events SET name=@name, abbreviation=@abbreviation, category=@category,
+        measurement_unit=@measurement_unit, is_relay=@is_relay, is_adaptive=@is_adaptive
+      WHERE id=@id AND is_custom=1
+    `).run({
+      name:             data.name.trim(),
+      abbreviation:     data.abbreviation?.trim() || null,
+      category:         data.category,
+      measurement_unit: data.measurement_unit,
+      is_relay:         data.is_relay    ? 1 : 0,
+      is_adaptive:      data.is_adaptive ? 1 : 0,
+      id,
+    })
+    return db.prepare('SELECT * FROM tf_events WHERE id=?').get(id)
+  })
+
+  ipcMain.handle('tfEvents:delete', (_, id) => {
+    const inUse = db.prepare('SELECT COUNT(*) AS c FROM meet_events WHERE tf_event_id=?').get(id).c
+    if (inUse > 0) return { success: false, error: 'This event is used in one or more meets and cannot be deleted.' }
+    db.prepare('DELETE FROM tf_events WHERE id=? AND is_custom=1').run(id)
+    return { success: true }
+  })
 }
 
 // ═══════════════════════════════════════════════
@@ -263,6 +423,8 @@ function registerSettingsHandlers() {
       connected:       s.connected       || false,
       labelPrinter:    s.labelPrinter    || '',
       sheetPrinter:    s.sheetPrinter    || '',
+      homeTeam:             s.homeTeam             || 'Pegasus Track',
+      attendanceThreshold:  s.attendanceThreshold  ?? 3,
     }
   })
 
@@ -272,10 +434,12 @@ function registerSettingsHandlers() {
       supabaseAnonKey: data.supabaseAnonKey,
       parentEmail:     data.parentEmail,
     }
-    if (data.supabaseServiceKey) updates.supabaseServiceKey = data.supabaseServiceKey
-    if (data.claudeApiKey)       updates.claudeApiKey       = data.claudeApiKey
-    if (data.labelPrinter  !== undefined) updates.labelPrinter  = data.labelPrinter
-    if (data.sheetPrinter  !== undefined) updates.sheetPrinter  = data.sheetPrinter
+    if (data.supabaseServiceKey)          updates.supabaseServiceKey  = data.supabaseServiceKey
+    if (data.claudeApiKey)                updates.claudeApiKey        = data.claudeApiKey
+    if (data.labelPrinter  !== undefined) updates.labelPrinter        = data.labelPrinter
+    if (data.sheetPrinter  !== undefined) updates.sheetPrinter        = data.sheetPrinter
+    if (data.homeTeam      !== undefined) updates.homeTeam            = data.homeTeam
+    if (data.attendanceThreshold !== undefined) updates.attendanceThreshold = Number(data.attendanceThreshold) || 3
     writeSettings(updates)
     return { success: true }
   })
@@ -463,6 +627,39 @@ function registerMeetHandlers() {
   ipcMain.handle('meetEvents:remove', (_, id) => {
     db.prepare('DELETE FROM meet_events WHERE id=?').run(id)
     return { success: true }
+  })
+
+  ipcMain.handle('meetEvents:advance', (_, { fromEventId, toEventId, topN }) => {
+    const toAdvance = db.prepare(`
+      SELECT e.athlete_id, r.mark
+      FROM entries e
+      JOIN results r ON r.entry_id = e.id
+      WHERE e.meet_event_id = ?
+        AND e.scratched = 0
+        AND (r.disqualified IS NULL OR r.disqualified = 0)
+        AND (r.did_not_start IS NULL OR r.did_not_start = 0)
+        AND (r.did_not_finish IS NULL OR r.did_not_finish = 0)
+        AND r.place IS NOT NULL
+      ORDER BY r.place ASC
+      LIMIT ?
+    `).all(fromEventId, topN)
+
+    const checkEntry  = db.prepare('SELECT id FROM entries WHERE meet_event_id=? AND athlete_id=?')
+    const insertEntry = db.prepare('INSERT INTO entries (meet_event_id, athlete_id, seed_mark) VALUES (?,?,?)')
+
+    let advanced = 0, alreadyInEvent = 0
+    db.transaction(() => {
+      for (const row of toAdvance) {
+        if (checkEntry.get(toEventId, row.athlete_id)) {
+          alreadyInEvent++
+        } else {
+          insertEntry.run(toEventId, row.athlete_id, row.mark || null)
+          advanced++
+        }
+      }
+    })()
+
+    return { advanced, alreadyInEvent }
   })
 
   ipcMain.handle('meetEvents:getWithEntries', (_, meetEventId) => {
@@ -809,6 +1006,153 @@ function parseTCLFile(filePath) {
   return { athletes, dbg }
 }
 
+// ─── TCL full-meet parser helpers ──────────────────────────────────
+function _parseE2(line) {
+  // E2F  102.00E A          0.00  0.00        2  7  5   10                ... 80  ← trailing checksum
+  // E2F   16.50M A-0.0     16.51 63.58        4  2  4    5                ... 51
+  // E2F    0.00MQA-0.0      0.00  0.00        2  2  0    0                ... 11  ← DNS/no-mark
+  // Data ends by column ~55; trailing two-digit checksum must be excluded.
+  if (line.length < 14) return { mark: null, wind: null, place: null }
+  const rawMark = parseFloat(line.slice(3, 11)) || 0
+  const unit    = line[11] || 'M'   // 'E'=English inches, 'M'=Metric seconds
+  const qual    = line[12] || ' '   // ' '=valid, 'Q'=no mark, 'N'=no attempt
+
+  const dataRegion = line.slice(0, 60)              // exclude trailing checksum
+  const allNums = [...dataRegion.matchAll(/\d+/g)]
+  const lastNum = allNums.length ? parseInt(allNums[allNums.length - 1][0]) : null
+  const place   = lastNum || null
+
+  if (!rawMark || qual !== ' ') {
+    return { mark: null, wind: null, place: null, isDNS: qual === 'Q' }
+  }
+
+  const windM   = line.slice(14).match(/^([+-]?[\d.]+)/)
+  const windVal = windM ? parseFloat(windM[1]) : null
+  const wind    = windVal !== null && !isNaN(windVal) ? windVal.toFixed(1) : null
+
+  let mark
+  if (unit === 'E') {
+    const totalInches = Math.round(rawMark)
+    mark = `${Math.floor(totalInches / 12)}-${totalInches % 12}`
+  } else {
+    if (rawMark >= 60) {
+      const mins = Math.floor(rawMark / 60)
+      const secs = (rawMark % 60).toFixed(2).padStart(5, '0')
+      mark = `${mins}:${secs}`
+    } else {
+      mark = rawMark.toFixed(2)
+    }
+  }
+  return { mark, wind, place }
+}
+
+function _parseE6(line) {
+  // E6  7 Girls 9-10 Long Jump                                            34 ← trailing checksum
+  // E6 78 Girls 9-10 100 Meter Dash                                       05
+  // Stop capture at the first run of 3+ spaces so the checksum is excluded.
+  const m = line.match(/^E6\s*(\d+)\s+(Boys|Girls)\s+([\d-]+)\s+(.+?)(?:\s{3,}|$)/)
+  if (!m) return null
+  const [, numStr, genderStr, ageGroup, rawName] = m
+  let name = rawName.trim()
+  if (/^Other\s+SOFTBALL$/i.test(name)) name = 'Softball Throw'
+  else if (/^Other\s+/i.test(name)) name = name.replace(/^Other\s+/i, '').trim()
+  return {
+    num:      parseInt(numStr),
+    name,
+    gender:   genderStr === 'Girls' ? 'F' : 'M',
+    ageGroup,
+    category: _classifyTCLEvent(name),
+  }
+}
+
+function _classifyTCLEvent(name) {
+  const n = name.toLowerCase()
+  if (/relay/.test(n)) return 'relay'
+  if (/jump|vault/.test(n)) return 'field'
+  if (/throw|put|discus|javelin|hammer|softball/.test(n)) return 'field'
+  if (/pentathlon|heptathlon|decathlon/.test(n)) return 'combined'
+  return 'track'
+}
+
+function _normEventName(name) {
+  const n = name.toLowerCase().trim()
+  if (n === 'discus throw') return 'discus'
+  if (n === 'hammer throw') return 'hammer'
+  if (n === 'javelin throw') return 'javelin'
+  return n
+}
+
+function parseTCLAsMeet(filePath) {
+  const raw   = fs.readFileSync(filePath, 'latin1')
+  const lines = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
+
+  let meetName = 'Imported Meet', meetDate = new Date().toISOString().slice(0, 10), meetLocation = ''
+  const athleteMap   = new Map()  // num → { firstName, lastName, gender, dob, team }
+  const eventDescMap = new Map()  // eventNum → { name, gender, ageGroup, category }
+  const entries      = []
+
+  let currentTeam = '', currentTeamCode = '', pendingEntry = null, pendingResult = null
+
+  for (const rawLine of lines) {
+    const line = rawLine.trimEnd()
+    const type = line.length >= 2 ? line.slice(0, 2) : ''
+
+    if (type === 'B1' && line.length >= 90) {
+      meetName     = line.slice(47, 87).trim() || line.slice(2, 47).trim() || 'Imported Meet'
+      meetLocation = line.slice(2, 47).trim()
+      const dm = line.match(/(\d{2})\/(\d{2})-(\d{2})/)
+      if (dm) meetDate = `20${dm[3]}-${dm[1]}-${dm[2]}`
+    }
+
+    if (type === 'C1') {
+      const rest = line.slice(2)
+      const cm   = rest.match(/^([A-Z0-9]{2,5})\s+(.+?)\s{3,}/)
+      if (cm) { currentTeamCode = cm[1].trim(); currentTeam = cm[2].trim() }
+      else {
+        currentTeamCode = rest.match(/^([A-Z0-9]{2,5})/)?.[1] || ''
+        currentTeam     = rest.replace(/^[A-Z0-9]{2,5}\s+/, '').split(/\s{3,}/)[0].trim()
+      }
+    }
+
+    if (type === 'D1') {
+      if (line.length < 40) continue
+      const gender = line[2]
+      if (gender !== 'M' && gender !== 'F') continue
+      const num   = line.slice(3, 8).trim()
+      const last  = line.slice(8, 23).trim()
+      const first = line.slice(23, 35).trim()
+      if (!last || !first) continue
+      const dm  = line.slice(40).match(/(\d{2})\/(\d{2})-(\d{2})/)
+      const dob = dm ? `20${dm[3]}-${dm[1]}-${dm[2]}` : ''
+      if (num) athleteMap.set(num, { firstName: first, lastName: last, gender, dob, team: currentTeam, teamCode: currentTeamCode })
+    }
+
+    if (type === 'E1') {
+      const num = line.slice(3, 8).trim()
+      pendingEntry  = { athleteNum: num }
+      pendingResult = null
+    }
+
+    if (type === 'E2') {
+      pendingResult = _parseE2(line)
+    }
+
+    if (type === 'E6') {
+      const ev = _parseE6(line)
+      if (ev) {
+        eventDescMap.set(ev.num, ev)
+        if (pendingEntry && pendingResult) {
+          entries.push({ athleteNum: pendingEntry.athleteNum, eventNum: ev.num, ...pendingResult })
+        }
+      }
+      pendingEntry  = null
+      pendingResult = null
+    }
+  }
+
+  return { meetName, meetDate, meetLocation, eventDescMap, athleteMap, entries }
+}
+
 function registerImportHandlers() {
   ipcMain.handle('import:tcl', async () => {
     try {
@@ -839,6 +1183,200 @@ function registerImportHandlers() {
         duplicate: existingKeys.has(`${a.first_name}|${a.last_name}|${a.date_of_birth}`),
       }))
     } catch (err) {
+      return { error: err.message }
+    }
+  })
+
+  ipcMain.handle('import:tclMeet', async (_, filePath) => {
+    try {
+      let resolvedPath = filePath
+      if (!resolvedPath) {
+        const res = await dialog.showOpenDialog({
+          title: 'Import Hy-tek TCL Results File',
+          filters: [
+            { name: 'Hy-tek TCL Files', extensions: ['TCL', 'tcl', 'txt'] },
+            { name: 'All Files', extensions: ['*'] },
+          ],
+          properties: ['openFile'],
+        })
+        if (res.canceled || !res.filePaths.length) return null
+        resolvedPath = res.filePaths[0]
+      }
+
+      const { meetName, meetDate, meetLocation, eventDescMap, athleteMap, entries } = parseTCLAsMeet(resolvedPath)
+      // team breakdown in parsed data
+      const teamCounts = {}
+      for (const a of athleteMap.values()) teamCounts[a.team || 'Unknown'] = (teamCounts[a.team || 'Unknown'] || 0) + 1
+      // first 5 athletes whose team is NOT pegasus (for diagnostic)
+      const sampleNonPegasus = [...athleteMap.entries()]
+        .filter(([,a]) => !/pegasus/i.test(a.team || '') && a.teamCode !== 'PTC')
+        .slice(0, 5)
+        .map(([num, a]) => `${num}=${a.firstName} ${a.lastName} team="${a.team}" code="${a.teamCode}"`)
+      console.log('[TCL import] parsed:', {
+        meetName, meetDate,
+        events: eventDescMap.size,
+        athletes: athleteMap.size,
+        entries: entries.length,
+        teamCounts,
+        sampleNonPegasus,
+        sampleEvents: [...eventDescMap.values()].slice(0, 5).map(e => e.name),
+      })
+      if (!eventDescMap.size) return { error: 'No events found in the TCL file.' }
+      if (!entries.length) return { error: 'No entries found in the TCL file.' }
+
+      const tfEventRows = db.prepare('SELECT id, name, category FROM tf_events').all()
+      console.log('[TCL import] tf_events in DB:', tfEventRows.length, tfEventRows.slice(0,5).map(e=>e.name))
+      const tfByNorm    = new Map()
+      for (const e of tfEventRows) {
+        tfByNorm.set(e.name.toLowerCase(), e)
+        tfByNorm.set(_normEventName(e.name.toLowerCase()), e)
+      }
+
+      // Determine canonical home-team name from existing roster
+      const homeTeamRow = db.prepare(
+        `SELECT team, COUNT(*) cnt FROM athletes WHERE active=1 AND team!='' GROUP BY team ORDER BY cnt DESC LIMIT 1`
+      ).get()
+      const homeTeamName = homeTeamRow?.team || 'Pegasus Track'
+      console.log('[TCL import] home team name:', homeTeamName)
+
+      const importFn = db.transaction(() => {
+        // ── Meet ──────────────────────────────────────────────────
+        const meetRow = db.prepare(
+          `INSERT INTO meets (name, date, type, status, location) VALUES (?,?,?,?,?)`
+        ).run(meetName, meetDate, 'invitational', 'completed', meetLocation || '')
+        const meetId = meetRow.lastInsertRowid
+
+        // ── Meet events ───────────────────────────────────────────
+        const meetEventMap = new Map()  // tcl eventNum → { meid, tfEvent }
+        const comboToMeid  = new Map()  // "tfId_gender_ag" → meid
+        const skippedEvents = []
+        const stmtME = db.prepare(
+          `INSERT INTO meet_events (meet_id, tf_event_id, gender, age_group, round, sort_order) VALUES (?,?,?,?,?,?)`
+        )
+        for (const [evNum, evDesc] of eventDescMap) {
+          const tfEvent = tfByNorm.get(evDesc.name.toLowerCase())
+                       ?? tfByNorm.get(_normEventName(evDesc.name.toLowerCase()))
+          if (!tfEvent) { skippedEvents.push(evDesc.name); continue }
+          const ck = `${tfEvent.id}_${evDesc.gender}_${evDesc.ageGroup}`
+          if (!comboToMeid.has(ck)) {
+            const r = stmtME.run(meetId, tfEvent.id, evDesc.gender, evDesc.ageGroup, 'final', evNum)
+            comboToMeid.set(ck, r.lastInsertRowid)
+          }
+          meetEventMap.set(evNum, { meid: comboToMeid.get(ck), tfEvent })
+        }
+        console.log('[TCL import] meet events matched:', comboToMeid.size, '| skipped:', skippedEvents)
+        console.log('[TCL import] meetEventMap size:', meetEventMap.size, '| entries to process:', entries.length)
+
+        // ── Athletes (match or insert) ─────────────────────────────
+        const findByNum = db.prepare('SELECT id, active FROM athletes WHERE athlete_number=? LIMIT 1')
+        // Look up by name only (no DOB) so DOB format mismatches don't cause duplicate inserts.
+        // Returns the EARLIEST inserted row (lowest id) which is most likely the original correct record.
+        const findByName = db.prepare(
+          `SELECT id, active, team FROM athletes
+           WHERE lower(first_name)=lower(?) AND lower(last_name)=lower(?)
+           ORDER BY id LIMIT 1`
+        )
+        const fixAndActivate = db.prepare(
+          "UPDATE athletes SET active=1, team=?, updated_at=datetime('now') WHERE id=?"
+        )
+        const insertAth = db.prepare(
+          `INSERT INTO athletes (first_name,last_name,date_of_birth,gender,athlete_number,team,active)
+           VALUES (@fn,@ln,@dob,@g,@num,@team,1)`
+        )
+        const athIdCache = new Map()
+        let athFound = 0, athInserted = 0, athNotInMap = 0
+        const insertErrors = []
+        function resolveAthlete(num) {
+          if (athIdCache.has(num)) return athIdCache.get(num)
+          const info = athleteMap.get(num)
+          if (!info) { athNotInMap++; return null }
+          const isHomeTeam = /pegasus/i.test(info.team || '') || info.teamCode === 'PTC'
+          const teamName   = isHomeTeam ? homeTeamName : (info.team || 'Unknown')
+
+          let row = null
+          if (isHomeTeam && num) row = findByNum.get(num)   // bib lookup only for home team
+          if (!row) row = findByName.get(info.firstName, info.lastName)
+
+          if (row) {
+            // Always fix the team and ensure active — handles previously-misnamed athletes
+            fixAndActivate.run(teamName, row.id)
+            athFound++
+            athIdCache.set(num, row.id)
+            return row.id
+          }
+
+          try {
+            const ins = insertAth.run({ fn: info.firstName, ln: info.lastName, dob: info.dob || '0000-00-00', g: info.gender, num: num || null, team: teamName })
+            athInserted++
+            athIdCache.set(num, ins.lastInsertRowid)
+            return ins.lastInsertRowid
+          } catch (e) {
+            console.error('[TCL INSERT athlete FAILED]', { num, info, teamName, error: e.message })
+            insertErrors.push(`${info.firstName} ${info.lastName}: ${e.message}`)
+            return null
+          }
+        }
+
+        // ── Entries and results ───────────────────────────────────
+        const stmtEntry  = db.prepare('INSERT INTO entries (meet_event_id, athlete_id, seed_mark) VALUES (?,?,NULL)')
+        const checkDupe  = db.prepare('SELECT id FROM entries WHERE meet_event_id=? AND athlete_id=?')
+        const stmtRes    = db.prepare(
+          `INSERT INTO results (entry_id,mark,wind,place,disqualified,dq_reason,did_not_start,did_not_finish,hand_timed,attempts_json,is_pr)
+           VALUES (?,?,?,?,0,NULL,?,0,0,NULL,0)`
+        )
+        const stmtGetPR  = db.prepare('SELECT mark FROM personal_records WHERE athlete_id=? AND tf_event_id=? AND indoor=0')
+        const stmtSetPR  = db.prepare('UPDATE results SET is_pr=1 WHERE entry_id=?')
+        const stmtUpsert = db.prepare(
+          `INSERT INTO personal_records (athlete_id,tf_event_id,mark,indoor,updated_at) VALUES (?,?,?,0,datetime('now'))
+           ON CONFLICT(athlete_id,tf_event_id,indoor) DO UPDATE SET mark=excluded.mark,updated_at=datetime('now')`
+        )
+
+        let entriesAdded = 0, resultsAdded = 0, skippedNoEvent = 0, skippedNoAthlete = 0, skippedDupe = 0
+        for (const en of entries) {
+          const ev = meetEventMap.get(en.eventNum)
+          if (!ev) { skippedNoEvent++; continue }
+          const athleteId = resolveAthlete(en.athleteNum)
+          if (!athleteId) { skippedNoAthlete++; continue }
+          if (checkDupe.get(ev.meid, athleteId)) { skippedDupe++; continue }
+
+          const entryId = stmtEntry.run(ev.meid, athleteId).lastInsertRowid
+          entriesAdded++
+
+          const isDNS = !en.mark || en.isDNS
+          stmtRes.run(entryId, en.mark || null, en.wind || null, en.place || null, isDNS ? 1 : 0)
+          resultsAdded++
+
+          if (en.mark && !isDNS) {
+            const newVal = parseMark(en.mark, ev.tfEvent.category)
+            if (newVal !== null) {
+              const existing = stmtGetPR.get(athleteId, ev.tfEvent.id)
+              const prVal    = existing ? parseMark(existing.mark, ev.tfEvent.category) : null
+              const isField  = ev.tfEvent.category === 'field' || ev.tfEvent.category === 'combined'
+              if (prVal === null || (isField ? newVal > prVal : newVal < prVal)) {
+                stmtSetPR.run(entryId)
+                stmtUpsert.run(athleteId, ev.tfEvent.id, en.mark)
+              }
+            }
+          }
+        }
+
+        console.log('[TCL import] DONE — entriesAdded:', entriesAdded, 'resultsAdded:', resultsAdded,
+          '| skipped noEvent:', skippedNoEvent, 'noAthlete:', skippedNoAthlete, 'dupe:', skippedDupe,
+          '| athletes found:', athFound, 'inserted:', athInserted, 'notInMap:', athNotInMap)
+        return { meetId, eventsAdded: comboToMeid.size, entriesAdded, resultsAdded, skippedEvents,
+                 skippedNoEvent, skippedNoAthlete, skippedDupe, athFound, athInserted, athNotInMap, teamCounts, insertErrors, sampleNonPegasus }
+      })
+
+      const result = importFn()
+      // post-transaction: see what non-Pegasus teams are actually in DB
+      const visitingInDB = db.prepare(
+        `SELECT team, COUNT(*) cnt FROM athletes WHERE active=1 AND lower(team) NOT LIKE '%pegasus%' GROUP BY team`
+      ).all()
+      console.log('[TCL import] transaction result:', result)
+      console.log('[TCL import] non-Pegasus in DB after import:', visitingInDB)
+      return { ...result, visitingInDB }
+    } catch (err) {
+      console.error('TCL meet import error:', err)
       return { error: err.message }
     }
   })
@@ -968,6 +1506,51 @@ body  { margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; }
       return { success: false, reason: e.message }
     }
   })
+
+  ipcMain.handle('print:savePDF', async (event, { html, css, filename }) => {
+    const os = require('os')
+    const win = BrowserWindow.getFocusedWindow()
+
+    const { filePath, canceled } = await dialog.showSaveDialog(win, {
+      title: 'Save PDF',
+      defaultPath: path.join(app.getPath('documents'), filename || 'pegasus-sheet.pdf'),
+      filters: [{ name: 'PDF Document', extensions: ['pdf'] }],
+    })
+    if (canceled || !filePath) return { success: false, canceled: true }
+
+    const fullHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+${css}
+@page { size: 8.5in 11in; margin: 0; }
+body  { margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; }
+* { visibility: visible !important; }
+</style></head><body>${html}</body></html>`
+
+    const tmpHtml = path.join(os.tmpdir(), `pegasus-save-${Date.now()}.html`)
+    fs.writeFileSync(tmpHtml, fullHtml, 'utf8')
+
+    const printWin = new BrowserWindow({
+      show: false, width: 816, height: 30000,
+      webPreferences: { nodeIntegration: false, contextIsolation: true },
+    })
+    await printWin.loadURL(`file:///${tmpHtml.replace(/\\/g, '/')}`)
+    await new Promise(r => setTimeout(r, 200))
+
+    try {
+      const pdfData = await printWin.webContents.printToPDF({
+        printBackground: true,
+        preferCSSPageSize: true,
+      })
+      printWin.close()
+      try { fs.unlinkSync(tmpHtml) } catch {}
+      fs.writeFileSync(filePath, pdfData)
+      await shell.openPath(filePath)
+      return { success: true, filePath }
+    } catch (e) {
+      printWin.close()
+      try { fs.unlinkSync(tmpHtml) } catch {}
+      return { success: false, reason: e.message }
+    }
+  })
 }
 
 function registerTeamHandlers() {
@@ -998,6 +1581,451 @@ function registerTeamHandlers() {
   })
 }
 
+function registerRunathonHandlers() {
+  const JOIN_SQL = `
+    SELECT re.*, a.first_name, a.last_name, a.gender, a.team,
+      CAST((julianday('now') - julianday(a.date_of_birth)) / 365.25 AS INTEGER) AS age
+    FROM runathon_entries re
+    LEFT JOIN athletes a ON re.athlete_id = a.id
+  `
+
+  ipcMain.handle('runathon:getEntries', (_, meetId) =>
+    db.prepare(`${JOIN_SQL} WHERE re.meet_id = ?
+      ORDER BY COALESCE(a.last_name || ' ' || a.first_name, re.guest_name) ASC`).all(meetId)
+  )
+
+  ipcMain.handle('runathon:upsertEntry', (_, data) => {
+    const { id, meet_id, athlete_id, guest_name, guest_team, laps, best_distance, pledge_per_lap, flat_pledges, notes } = data
+    const byId = db.prepare(`${JOIN_SQL} WHERE re.id = ?`)
+
+    if (id) {
+      db.prepare(`
+        UPDATE runathon_entries
+        SET laps=@laps, best_distance=@best_distance,
+            pledge_per_lap=@pledge_per_lap, flat_pledges=@flat_pledges, notes=@notes
+        WHERE id=@id
+      `).run({
+        id,
+        laps: laps ?? null, best_distance: best_distance || null,
+        pledge_per_lap: pledge_per_lap ?? null, flat_pledges: flat_pledges ?? null,
+        notes: notes || null,
+      })
+      return byId.get(id)
+    }
+
+    const r = db.prepare(`
+      INSERT INTO runathon_entries (meet_id, athlete_id, guest_name, guest_team, laps, best_distance, pledge_per_lap, flat_pledges, notes)
+      VALUES (@meet_id, @athlete_id, @guest_name, @guest_team, @laps, @best_distance, @pledge_per_lap, @flat_pledges, @notes)
+    `).run({
+      meet_id, athlete_id: athlete_id || null,
+      guest_name: guest_name || null, guest_team: guest_team || null,
+      laps: laps ?? null, best_distance: best_distance || null,
+      pledge_per_lap: pledge_per_lap ?? null, flat_pledges: flat_pledges ?? null,
+      notes: notes || null,
+    })
+    return byId.get(r.lastInsertRowid)
+  })
+
+  ipcMain.handle('runathon:removeEntry', (_, id) => {
+    db.prepare('DELETE FROM runathon_entries WHERE id=?').run(id)
+    return { success: true }
+  })
+
+  ipcMain.handle('runathon:bulkAddRoster', (_, { meetId, athleteIds }) => {
+    const stmt = db.prepare('INSERT OR IGNORE INTO runathon_entries (meet_id, athlete_id) VALUES (?, ?)')
+    db.transaction((ids) => { for (const aid of ids) stmt.run(meetId, aid) })(athleteIds)
+    return db.prepare(`${JOIN_SQL} WHERE re.meet_id = ?
+      ORDER BY COALESCE(a.last_name || ' ' || a.first_name, re.guest_name) ASC`).all(meetId)
+  })
+}
+
+// ═══════════════════════════════════════════════
+// IPC — RELAY LEGS
+// ═══════════════════════════════════════════════
+
+function registerRelayHandlers() {
+  ipcMain.handle('relay:getLegs', (_, entryId) =>
+    db.prepare(`
+      SELECT rl.leg, rl.athlete_id,
+        a.first_name, a.last_name, a.team, a.gender AS athlete_gender
+      FROM relay_legs rl
+      LEFT JOIN athletes a ON rl.athlete_id = a.id
+      WHERE rl.entry_id = ?
+      ORDER BY rl.leg
+    `).all(entryId)
+  )
+
+  ipcMain.handle('relay:saveLeg', (_, { entryId, leg, athleteId }) => {
+    if (athleteId) {
+      db.prepare(`
+        INSERT INTO relay_legs (entry_id, leg, athlete_id)
+        VALUES (?, ?, ?)
+        ON CONFLICT(entry_id, leg) DO UPDATE SET athlete_id = excluded.athlete_id
+      `).run(entryId, leg, athleteId)
+    } else {
+      db.prepare('DELETE FROM relay_legs WHERE entry_id = ? AND leg = ?').run(entryId, leg)
+    }
+    return { success: true }
+  })
+
+  ipcMain.handle('relay:getLegsForMeet', (_, meetId) => {
+    const rows = db.prepare(`
+      SELECT rl.entry_id, rl.leg, rl.athlete_id,
+        a.first_name, a.last_name, a.team, a.gender AS athlete_gender
+      FROM relay_legs rl
+      JOIN athletes a ON rl.athlete_id = a.id
+      JOIN entries e ON rl.entry_id = e.id
+      JOIN meet_events me ON e.meet_event_id = me.id
+      WHERE me.meet_id = ?
+      ORDER BY rl.entry_id, rl.leg
+    `).all(meetId)
+    const byEntry = {}
+    for (const row of rows) {
+      if (!byEntry[row.entry_id]) byEntry[row.entry_id] = []
+      byEntry[row.entry_id].push(row)
+    }
+    return byEntry
+  })
+}
+
+// ═══════════════════════════════════════════════
+// IPC — SEASON SCORING
+// ═══════════════════════════════════════════════
+
+function registerScoresHandlers() {
+  ipcMain.handle('scores:getSeasons', () =>
+    db.prepare('SELECT * FROM seasons ORDER BY year DESC, id DESC').all()
+  )
+
+  ipcMain.handle('scores:getSeasonal', (_, seasonId) => {
+    const season = db.prepare('SELECT * FROM seasons WHERE id = ?').get(seasonId)
+    if (!season) return null
+
+    const meets = db.prepare(
+      "SELECT id, name, date FROM meets WHERE season_id = ? AND status != 'cancelled' ORDER BY date"
+    ).all(seasonId)
+
+    const rows = db.prepare(`
+      SELECT
+        a.team,
+        m.id   AS meet_id,
+        te.category,
+        r.place
+      FROM results r
+      JOIN entries     e  ON r.entry_id      = e.id
+      JOIN meet_events me ON e.meet_event_id = me.id
+      JOIN meets       m  ON me.meet_id      = m.id
+      JOIN tf_events   te ON me.tf_event_id  = te.id
+      JOIN athletes    a  ON e.athlete_id    = a.id
+      WHERE m.season_id      = ?
+        AND r.place          IS NOT NULL
+        AND r.disqualified   = 0
+        AND r.did_not_start  = 0
+        AND r.did_not_finish = 0
+        AND e.scratched      = 0
+        AND a.team IS NOT NULL
+        AND a.team != ''
+    `).all(seasonId)
+
+    const SCORES = { 1: 8, 2: 6, 3: 5, 4: 4, 5: 3, 6: 2, 7: 1 }
+    const teams = {}
+
+    for (const row of rows) {
+      const pts = SCORES[row.place]
+      if (!pts) continue
+      if (!teams[row.team]) teams[row.team] = {
+        name: row.team, total: 0,
+        byMeet: {},
+        byCategory: { track: 0, relay: 0, field: 0, combined: 0 },
+      }
+      const t = teams[row.team]
+      t.total += pts
+      t.byMeet[row.meet_id] = (t.byMeet[row.meet_id] || 0) + pts
+      t.byCategory[row.category] = (t.byCategory[row.category] || 0) + pts
+    }
+
+    return {
+      season,
+      meets,
+      teams: Object.values(teams).sort((a, b) => b.total - a.total),
+    }
+  })
+}
+
+// ═══════════════════════════════════════════════
+// IPC — RECORDS
+// ═══════════════════════════════════════════════
+
+function registerRecordsHandlers() {
+  ipcMain.handle('records:getAll', (_, scope) => {
+    if (scope) {
+      return db.prepare(
+        'SELECT * FROM records WHERE scope = ? ORDER BY event_category, event_name, gender, age_group'
+      ).all(scope)
+    }
+    return db.prepare(
+      'SELECT * FROM records ORDER BY scope, event_category, event_name, gender, age_group'
+    ).all()
+  })
+
+  ipcMain.handle('records:save', (_, data) => {
+    if (data.id) {
+      db.prepare(`
+        UPDATE records SET
+          scope=@scope, event_name=@event_name, event_category=@event_category,
+          gender=@gender, age_group=@age_group, mark=@mark, mark_value=@mark_value,
+          wind=@wind, athlete_name=@athlete_name, athlete_id=@athlete_id,
+          team=@team, meet_name=@meet_name, meet_id=@meet_id,
+          meet_date=@meet_date, notes=@notes, is_auto=0,
+          updated_at=datetime('now')
+        WHERE id=@id
+      `).run({ ...data, mark_value: data.mark_value ?? null, athlete_id: data.athlete_id ?? null, meet_id: data.meet_id ?? null })
+      return { success: true }
+    }
+    const r = db.prepare(`
+      INSERT INTO records
+        (scope, event_name, event_category, gender, age_group, mark, mark_value,
+         wind, athlete_name, athlete_id, team, meet_name, meet_id, meet_date, notes, is_auto)
+      VALUES
+        (@scope, @event_name, @event_category, @gender, @age_group, @mark, @mark_value,
+         @wind, @athlete_name, @athlete_id, @team, @meet_name, @meet_id, @meet_date, @notes, 0)
+    `).run({ ...data, mark_value: data.mark_value ?? null, athlete_id: data.athlete_id ?? null, meet_id: data.meet_id ?? null })
+    return { id: r.lastInsertRowid }
+  })
+
+  ipcMain.handle('records:delete', (_, id) => {
+    db.prepare('DELETE FROM records WHERE id = ?').run(id)
+    return { success: true }
+  })
+
+  ipcMain.handle('records:syncFromResults', () => {
+    const { readSettings } = require('./settings')
+    const homeTeam = readSettings().homeTeam || 'Pegasus Track'
+
+    const rows = db.prepare(`
+      SELECT
+        r.mark, r.wind,
+        te.name     AS event_name,
+        te.category AS event_category,
+        me.gender,
+        COALESCE(me.age_group, '') AS age_group,
+        a.first_name || ' ' || a.last_name AS athlete_name,
+        a.id   AS athlete_id,
+        a.team AS team,
+        m.name AS meet_name,
+        m.id   AS meet_id,
+        m.date AS meet_date
+      FROM results r
+      JOIN entries     e  ON r.entry_id       = e.id
+      JOIN meet_events me ON e.meet_event_id  = me.id
+      JOIN meets       m  ON me.meet_id        = m.id
+      JOIN tf_events   te ON me.tf_event_id   = te.id
+      JOIN athletes    a  ON e.athlete_id      = a.id
+      WHERE r.disqualified   = 0
+        AND r.did_not_start  = 0
+        AND r.did_not_finish = 0
+        AND r.mark IS NOT NULL
+        AND r.mark != ''
+    `).all()
+
+    const isBetter = (newVal, oldVal, cat) => {
+      if (oldVal == null) return true
+      return (cat === 'field' || cat === 'combined') ? newVal > oldVal : newVal < oldVal
+    }
+
+    const clubBests = {}
+    const openBests = {}
+
+    for (const row of rows) {
+      const val = parseMark(row.mark, row.event_category)
+      if (val === null) continue
+      const key = `${row.event_name}|${row.gender}|${row.age_group}`
+      const rec = { ...row, mark_value: val, wind: row.wind != null ? String(row.wind) : '' }
+
+      if (!openBests[key] || isBetter(val, openBests[key].mark_value, row.event_category))
+        openBests[key] = rec
+
+      if (row.team === homeTeam &&
+          (!clubBests[key] || isBetter(val, clubBests[key].mark_value, row.event_category)))
+        clubBests[key] = rec
+    }
+
+    db.prepare('DELETE FROM records WHERE is_auto = 1').run()
+
+    const ins = db.prepare(`
+      INSERT INTO records
+        (scope, event_name, event_category, gender, age_group, mark, mark_value,
+         wind, athlete_name, athlete_id, team, meet_name, meet_id, meet_date, is_auto)
+      VALUES
+        (@scope, @event_name, @event_category, @gender, @age_group, @mark, @mark_value,
+         @wind, @athlete_name, @athlete_id, @team, @meet_name, @meet_id, @meet_date, 1)
+    `)
+    const bulkIns = db.transaction((bests, scope) => {
+      for (const rec of Object.values(bests)) ins.run({ ...rec, scope })
+    })
+    bulkIns(clubBests, 'club')
+    bulkIns(openBests, 'open')
+
+    return { club: Object.keys(clubBests).length, open: Object.keys(openBests).length }
+  })
+}
+
+function registerAttendanceHandlers() {
+  // Sync attendance from entries for a meet (non-override rows only)
+  ipcMain.handle('attendance:syncFromEntries', (_, meetId) => {
+    const athletes = db.prepare(`
+      SELECT DISTINCT e.athlete_id
+      FROM entries e
+      JOIN meet_events me ON me.id = e.meet_event_id
+      WHERE me.meet_id = ? AND e.athlete_id IS NOT NULL AND e.scratched = 0
+    `).all(meetId)
+
+    const upsert = db.prepare(`
+      INSERT INTO attendance (athlete_id, meet_id, present, is_override)
+      VALUES (?, ?, 1, 0)
+      ON CONFLICT(athlete_id, meet_id) DO UPDATE SET
+        present = CASE WHEN is_override = 0 THEN 1 ELSE present END
+    `)
+    const sync = db.transaction(() => {
+      let count = 0
+      for (const { athlete_id } of athletes) {
+        upsert.run(athlete_id, meetId)
+        count++
+      }
+      return count
+    })
+    return { synced: sync() }
+  })
+
+  // Get all active athletes with their attendance for a specific meet
+  ipcMain.handle('attendance:getForMeet', (_, meetId) => {
+    // Auto-derive from entries (any non-scratched entry = attended)
+    const fromEntries = new Set(
+      db.prepare(`
+        SELECT DISTINCT e.athlete_id
+        FROM entries e JOIN meet_events me ON me.id = e.meet_event_id
+        WHERE me.meet_id = ? AND e.athlete_id IS NOT NULL AND e.scratched = 0
+      `).all(meetId).map(r => r.athlete_id)
+    )
+
+    const athletes = db.prepare(`
+      SELECT a.id, a.first_name, a.last_name, a.team, a.gender, a.athlete_number,
+             att.present, att.is_override, att.notes
+      FROM athletes a
+      LEFT JOIN attendance att ON att.athlete_id = a.id AND att.meet_id = ?
+      WHERE a.active = 1
+      ORDER BY a.last_name, a.first_name
+    `).all(meetId)
+
+    return athletes.map(a => ({
+      ...a,
+      // Override takes precedence; otherwise derive from entries
+      present: a.is_override ? !!a.present : fromEntries.has(a.id),
+      is_override: !!a.is_override,
+    }))
+  })
+
+  // Set attendance for one athlete at one meet (manual override)
+  ipcMain.handle('attendance:set', (_, { athleteId, meetId, present, notes }) => {
+    db.prepare(`
+      INSERT INTO attendance (athlete_id, meet_id, present, is_override, notes)
+      VALUES (?, ?, ?, 1, ?)
+      ON CONFLICT(athlete_id, meet_id) DO UPDATE SET
+        present = excluded.present, is_override = 1, notes = excluded.notes
+    `).run(athleteId, meetId, present ? 1 : 0, notes || null)
+    return { success: true }
+  })
+
+  // Clear override (revert to auto-derived from entries)
+  ipcMain.handle('attendance:clearOverride', (_, { athleteId, meetId }) => {
+    db.prepare(`DELETE FROM attendance WHERE athlete_id = ? AND meet_id = ?`).run(athleteId, meetId)
+    return { success: true }
+  })
+
+  // Season summary: per athlete, count meets attended across a season
+  ipcMain.handle('attendance:getSeasonSummary', (_, seasonId) => {
+    const meets = db.prepare(`
+      SELECT id, name, date, type FROM meets
+      WHERE season_id = ? AND type != 'runathon'
+      ORDER BY date
+    `).all(seasonId)
+
+    if (meets.length === 0) return { meets: [], athletes: [] }
+
+    const meetIds = meets.map(m => m.id)
+    const placeholders = meetIds.map(() => '?').join(',')
+
+    // Entries-derived attendance per meet per athlete
+    const entryRows = db.prepare(`
+      SELECT DISTINCT me.meet_id, e.athlete_id
+      FROM entries e JOIN meet_events me ON me.id = e.meet_event_id
+      WHERE me.meet_id IN (${placeholders}) AND e.athlete_id IS NOT NULL AND e.scratched = 0
+    `).all(...meetIds)
+
+    // Manual overrides
+    const overrides = db.prepare(`
+      SELECT athlete_id, meet_id, present, is_override
+      FROM attendance
+      WHERE meet_id IN (${placeholders})
+    `).all(...meetIds)
+
+    // Build override map
+    const overrideMap = {}
+    for (const o of overrides) {
+      overrideMap[`${o.athlete_id}_${o.meet_id}`] = o
+    }
+
+    // Build entries set
+    const entrySet = new Set(entryRows.map(r => `${r.athlete_id}_${r.meet_id}`))
+
+    // Effective attendance: override wins, otherwise entry-derived
+    const attendedSet = new Set()
+    for (const meetId of meetIds) {
+      const athleteIds = new Set(
+        db.prepare('SELECT DISTINCT id FROM athletes WHERE active=1').all().map(a => a.id)
+      )
+      for (const aid of athleteIds) {
+        const key = `${aid}_${meetId}`
+        const ov = overrideMap[key]
+        const present = ov?.is_override ? !!ov.present : entrySet.has(key)
+        if (present) attendedSet.add(key)
+      }
+    }
+
+    const athletes = db.prepare(`
+      SELECT id, first_name, last_name, team, gender
+      FROM athletes WHERE active = 1
+      ORDER BY last_name, first_name
+    `).all()
+
+    const athleteRows = athletes.map(a => {
+      const attended = meetIds.filter(mid => attendedSet.has(`${a.id}_${mid}`))
+      return { ...a, meets_attended: attended.length, attended_meet_ids: attended }
+    })
+
+    return { meets, athletes: athleteRows }
+  })
+}
+
+function registerTemplateHandlers() {
+  ipcMain.handle('templates:getAll', () =>
+    db.prepare('SELECT * FROM meet_templates ORDER BY created_at DESC').all()
+      .map(r => ({ ...r, events: JSON.parse(r.events_json) }))
+  )
+
+  ipcMain.handle('templates:save', (_, { name, events }) => {
+    const result = db.prepare(
+      'INSERT INTO meet_templates (name, events_json) VALUES (?, ?)'
+    ).run(name, JSON.stringify(events))
+    return { id: result.lastInsertRowid, name, events, created_at: new Date().toISOString() }
+  })
+
+  ipcMain.handle('templates:delete', (_, id) => {
+    db.prepare('DELETE FROM meet_templates WHERE id = ?').run(id)
+    return { success: true }
+  })
+}
+
 app.whenReady().then(() => {
   initDatabase()
   registerAthleteHandlers()
@@ -1012,7 +2040,14 @@ app.whenReady().then(() => {
   registerImportHandlers()
   registerPrintHandlers()
   registerAiHandlers()
+  registerRunathonHandlers()
+  registerRelayHandlers()
+  registerScoresHandlers()
+  registerRecordsHandlers()
+  registerAttendanceHandlers()
+  registerTemplateHandlers()
   createWindow()
+  require('./updater').checkForUpdates()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })

@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { athleteApi, athletes as _mockAthletes } from '../mockStore.js'
+import { getAutoPrint } from '../printPrefs.js'
 import {
   Calendar, Plus, X, Edit2, Trash2, ChevronLeft,
   Users, List, Trophy, Clock, MapPin, Play, CheckCircle,
@@ -55,6 +56,13 @@ let _nextId = 1
 const _db = { meets: [], meetEvents: [], entries: [], results: [], prs: {} }
 const _id = () => _nextId++
 const _now = () => new Date().toISOString().slice(0, 10)
+
+function _loadTemplates() {
+  try { return JSON.parse(localStorage.getItem('pt_meet_templates') || '[]') } catch { return [] }
+}
+function _persistTemplates(arr) {
+  localStorage.setItem('pt_meet_templates', JSON.stringify(arr))
+}
 
 function _parseMark(str, category) {
   if (!str) return null
@@ -202,6 +210,25 @@ const FALLBACK = {
   getAthletes: athleteApi.getAthletes,
   getSeasons:  () => Promise.resolve([]),
   getTfEvents: () => Promise.resolve(STATIC_TF_EVENTS),
+  getRunathonEntries:      ()     => Promise.resolve([]),
+  upsertRunathonEntry:     (data) => Promise.resolve({ ...data, id: data.id ?? Date.now() }),
+  removeRunathonEntry:     ()     => Promise.resolve({ success: true }),
+  bulkAddRunathonAthletes: ()     => Promise.resolve([]),
+  getRelayLegs:            ()     => Promise.resolve([]),
+  saveRelayLeg:            ()     => Promise.resolve({ success: true }),
+  getRelayLegsForMeet:     ()     => Promise.resolve({}),
+  advanceAthletes:         ()     => Promise.resolve({ advanced: 0, alreadyInEvent: 0 }),
+  getTemplates:   ()             => Promise.resolve(_loadTemplates()),
+  saveTemplate:   (name, events) => {
+    const t = { id: Date.now(), name, events, created_at: _now() }
+    _persistTemplates([..._loadTemplates(), t])
+    return Promise.resolve(t)
+  },
+  deleteTemplate: (id) => {
+    _persistTemplates(_loadTemplates().filter(t => t.id !== id))
+    return Promise.resolve({ success: true })
+  },
+  importTCLMeet: () => Promise.resolve({ error: 'TCL meet import requires the desktop app.' }),
 }
 
 // ─── API shim — reads window.electronAPI lazily so Electron's
@@ -236,6 +263,27 @@ function printSheetHtml(containerRef) {
   }
 }
 
+function savePdfHtml(containerRef, meetName, type) {
+  const css = Array.from(document.styleSheets).flatMap(sheet => {
+    try { return Array.from(sheet.cssRules).map(r => r.cssText) }
+    catch { return [] }
+  }).filter(t => {
+    const s = t.trimStart()
+    if (s.startsWith('@media') || s.startsWith('@font-face')) return false
+    return s.includes('.ps-') || s.includes('.print-sheet') || s.includes('.pbreak')
+  }).join('\n')
+
+  const html = containerRef.current?.innerHTML ?? ''
+  if (!html || !window.electronAPI?.savePDF) return
+
+  const safeName = (meetName || 'Meet').replace(/[^a-zA-Z0-9 _-]/g, '').trim().replace(/\s+/g, '-')
+  const filename = `${safeName}-${type || 'sheet'}.pdf`
+
+  window.electronAPI.savePDF({ html, css, filename })
+    .then(r => { if (r && !r.success && !r.canceled) alert(`Save failed: ${r.reason}`) })
+    .catch(err => alert(`Save error: ${err?.message ?? err}`))
+}
+
 // ─── Constants ────────────────────────────────────────────
 const STATUS_CFG = {
   upcoming:    { label: 'Upcoming',    badge: 'badge-gold',    dot: '#f59e0b' },
@@ -245,7 +293,9 @@ const STATUS_CFG = {
   cancelled:   { label: 'Cancelled',   badge: 'badge-red',     dot: '#ef4444' },
 }
 
-const MEET_TYPES  = ['invitational','home','away','dual','championship']
+const MEET_TYPES  = ['invitational','home','away','dual','championship','runathon']
+const MEET_TYPE_LABELS = { invitational:'Invitational', home:'Home', away:'Away', dual:'Dual', championship:'Championship', runathon:'Run-a-thon' }
+function meetTypeLabel(type) { return MEET_TYPE_LABELS[type] || (type ? type.charAt(0).toUpperCase() + type.slice(1) : '') }
 const AGE_GROUPS  = ['5-6','7-8','9-10','11-12','13-14','15-16','17-18','Open']
 const CAT_TABS    = ['All','Track','Relay','Field','Combined']
 const SCORE_TABLE = { 1: 8, 2: 6, 3: 5, 4: 4, 5: 3, 6: 2, 7: 1 }
@@ -340,7 +390,7 @@ function MeetModal({ meet, seasons, onSave, onClose }) {
           <div className="form-group">
             <label className="form-label">Meet Type</label>
             <select className="input" value={form.type} onChange={e => set('type', e.target.value)}>
-              {MEET_TYPES.map(t => <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>)}
+              {MEET_TYPES.map(t => <option key={t} value={t}>{meetTypeLabel(t)}</option>)}
             </select>
           </div>
 
@@ -382,6 +432,195 @@ function MeetModal({ meet, seasons, onSave, onClose }) {
   )
 }
 
+// ─── Templates Panel ──────────────────────────────────────
+function TemplatesPanel({ meet, meetDetail, onEventAdded }) {
+  const [templates,    setTemplates]    = useState([])
+  const [allMeets,     setAllMeets]     = useState([])
+  const [templateName, setTemplateName] = useState('')
+  const [saving,       setSaving]       = useState(false)
+  const [applying,     setApplying]     = useState(null)
+  const [copyMeetId,   setCopyMeetId]   = useState('')
+  const [copying,      setCopying]      = useState(false)
+  const [msg,          setMsg]          = useState('')
+
+  useEffect(() => {
+    api.getTemplates().then(setTemplates)
+    api.getMeets().then(ms =>
+      setAllMeets((ms || []).filter(m => m.id !== meet.id && m.type !== 'runathon'))
+    )
+  }, [meet.id])
+
+  const flash = (text) => { setMsg(text); setTimeout(() => setMsg(''), 3000) }
+
+  const handleSave = async () => {
+    if (!templateName.trim() || meetDetail.events.length === 0) return
+    setSaving(true)
+    const events = meetDetail.events.map(ev => ({
+      tf_event_id: ev.tf_event_id,
+      gender:      ev.gender,
+      age_group:   ev.age_group ?? null,
+      round:       ev.round,
+      sort_order:  ev.sort_order ?? 999,
+    }))
+    const t = await api.saveTemplate(templateName.trim(), events)
+    setTemplates(ts => [...ts, t])
+    setTemplateName('')
+    setSaving(false)
+    flash(`"${t.name}" saved!`)
+  }
+
+  const handleApply = async (template) => {
+    setApplying(template.id)
+    const existingKeys = new Set(
+      meetDetail.events.map(e => `${e.tf_event_id}_${e.gender}_${e.age_group ?? ''}`)
+    )
+    let added = 0, skipped = 0
+    for (const ev of template.events) {
+      const key = `${ev.tf_event_id}_${ev.gender}_${ev.age_group ?? ''}`
+      if (existingKeys.has(key)) { skipped++; continue }
+      const res = await api.addMeetEvent({ meet_id: meet.id, ...ev })
+      if (res?.error) skipped++
+      else { added++; onEventAdded(res); existingKeys.add(key) }
+    }
+    setApplying(null)
+    flash(`Added ${added} event${added !== 1 ? 's' : ''}${skipped ? ` · ${skipped} skipped` : ''}.`)
+  }
+
+  const handleDeleteTemplate = async (id) => {
+    await api.deleteTemplate(id)
+    setTemplates(ts => ts.filter(t => t.id !== id))
+  }
+
+  const handleCopyFromMeet = async () => {
+    if (!copyMeetId) return
+    setCopying(true)
+    const detail = await api.getMeetDetail(Number(copyMeetId))
+    if (!detail?.events?.length) {
+      flash('That meet has no events.')
+      setCopying(false)
+      return
+    }
+    const existingKeys = new Set(
+      meetDetail.events.map(e => `${e.tf_event_id}_${e.gender}_${e.age_group ?? ''}`)
+    )
+    let added = 0, skipped = 0
+    for (const ev of detail.events) {
+      const key = `${ev.tf_event_id}_${ev.gender}_${ev.age_group ?? ''}`
+      if (existingKeys.has(key)) { skipped++; continue }
+      const res = await api.addMeetEvent({
+        meet_id:     meet.id,
+        tf_event_id: ev.tf_event_id,
+        gender:      ev.gender,
+        age_group:   ev.age_group ?? null,
+        round:       ev.round,
+        sort_order:  ev.sort_order ?? 999,
+      })
+      if (res?.error) skipped++
+      else { added++; onEventAdded(res); existingKeys.add(key) }
+    }
+    setCopying(false)
+    flash(`Copied ${added} event${added !== 1 ? 's' : ''}${skipped ? ` · ${skipped} already in meet` : ''} from "${detail.name}".`)
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+      {/* Save as template */}
+      <div>
+        <div className="form-label" style={{ marginBottom: 6 }}>Save Current Events as Template</div>
+        {meetDetail.events.length === 0 ? (
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>
+            Add events to this meet first, then save them as a reusable template.
+          </div>
+        ) : (
+          <>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input className="input" placeholder="Template name…" value={templateName}
+                onChange={e => setTemplateName(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && templateName.trim() && handleSave()}
+                style={{ flex: 1 }} />
+              <button className="btn btn-primary" style={{ fontSize: 12, padding: '6px 12px' }}
+                onClick={handleSave} disabled={saving || !templateName.trim()}>
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+              Saves {meetDetail.events.length} event{meetDetail.events.length !== 1 ? 's' : ''} as a template
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Apply saved template */}
+      <div>
+        <div className="form-label" style={{ marginBottom: 6 }}>
+          Apply a Template
+          {templates.length > 0 && (
+            <span className="badge badge-blue" style={{ marginLeft: 8, fontSize: 10 }}>{templates.length}</span>
+          )}
+        </div>
+        {templates.length === 0 ? (
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>
+            No templates saved yet.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {templates.map(t => (
+              <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8,
+                background: 'var(--bg-tertiary)', borderRadius: 6, padding: '8px 10px' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden',
+                    textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {t.name}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    {t.events.length} event{t.events.length !== 1 ? 's' : ''}
+                  </div>
+                </div>
+                <button className="btn btn-primary" style={{ fontSize: 11, padding: '4px 10px' }}
+                  onClick={() => handleApply(t)} disabled={applying === t.id}>
+                  {applying === t.id ? 'Applying…' : 'Apply'}
+                </button>
+                <button className="btn btn-danger btn-icon" style={{ padding: 5 }}
+                  onClick={() => handleDeleteTemplate(t.id)} title="Delete template">
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Copy from another meet */}
+      {allMeets.length > 0 && (
+        <div>
+          <div className="form-label" style={{ marginBottom: 6 }}>Copy Events from Another Meet</div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <select className="input" value={copyMeetId} onChange={e => setCopyMeetId(e.target.value)}
+              style={{ flex: 1 }}>
+              <option value="">Select a meet…</option>
+              {allMeets.map(m => (
+                <option key={m.id} value={m.id}>{m.name} ({m.date})</option>
+              ))}
+            </select>
+            <button className="btn btn-ghost" style={{ fontSize: 12, padding: '6px 12px' }}
+              onClick={handleCopyFromMeet} disabled={copying || !copyMeetId}>
+              {copying ? 'Copying…' : 'Copy'}
+            </button>
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+            Copies event types only — no entries or results
+          </div>
+        </div>
+      )}
+
+      {msg && (
+        <div style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 500 }}>{msg}</div>
+      )}
+    </div>
+  )
+}
+
 // ─── Events Tab ───────────────────────────────────────────
 const BULK_AGE_GROUPS = ['5-6','7-8','9-10','11-12','13-14','15-16','17-18']
 
@@ -394,8 +633,8 @@ function EventsTab({ meet, meetDetail, tfEvents, onEventAdded, onEventRemoved })
   const [adding, setAdding]           = useState(false)
   const [addError, setAddError]       = useState('')
 
-  // Bulk-add state
-  const [bulkMode,      setBulkMode]      = useState(false)
+  // Panel mode: 'single' | 'bulk' | 'template'
+  const [mode,          setMode]          = useState('single')
   const [bulkEvents,    setBulkEvents]    = useState(new Set())
   const [bulkAgeGroups, setBulkAgeGroups] = useState(new Set())
   const [bulkGenders,   setBulkGenders]   = useState(new Set(['M', 'F']))
@@ -509,20 +748,28 @@ function EventsTab({ meet, meetDetail, tfEvents, onEventAdded, onEventRemoved })
         <div style={{ display: 'flex', background: 'var(--bg-tertiary)', borderRadius: 6,
           padding: 3, gap: 3, marginBottom: 12 }}>
           <button
-            className={`btn ${!bulkMode ? 'btn-primary' : 'btn-ghost'}`}
+            className={`btn ${mode === 'single' ? 'btn-primary' : 'btn-ghost'}`}
             style={{ flex: 1, fontSize: 11, padding: '4px 8px' }}
-            onClick={() => setBulkMode(false)}>
-            Single Event
+            onClick={() => setMode('single')}>
+            Single
           </button>
           <button
-            className={`btn ${bulkMode ? 'btn-primary' : 'btn-ghost'}`}
+            className={`btn ${mode === 'bulk' ? 'btn-primary' : 'btn-ghost'}`}
             style={{ flex: 1, fontSize: 11, padding: '4px 8px' }}
-            onClick={() => { setBulkMode(true); setBulkResult('') }}>
-            Bulk Setup
+            onClick={() => { setMode('bulk'); setBulkResult('') }}>
+            Bulk
+          </button>
+          <button
+            className={`btn ${mode === 'template' ? 'btn-primary' : 'btn-ghost'}`}
+            style={{ flex: 1, fontSize: 11, padding: '4px 8px' }}
+            onClick={() => setMode('template')}>
+            Templates
           </button>
         </div>
 
-        {bulkMode ? (
+        {mode === 'template' ? (
+          <TemplatesPanel meet={meet} meetDetail={meetDetail} onEventAdded={onEventAdded} />
+        ) : mode === 'bulk' ? (
           /* ── Bulk Setup Panel ── */
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
@@ -703,20 +950,25 @@ function EventsTab({ meet, meetDetail, tfEvents, onEventAdded, onEventRemoved })
 function WorksheetTab({ meet, meetDetail }) {
   const [selectedEvent, setSelectedEvent] = useState(null)
   const [eventDetail,   setEventDetail]   = useState(null)
-  const [results,       setResults]       = useState({})   // entryId → local edits
+  const [results,       setResults]       = useState({})
   const [athletes,      setAthletes]      = useState([])
   const [search,        setSearch]        = useState('')
   const [loading,       setLoading]       = useState(false)
   const [seeding,       setSeeding]       = useState(false)
   const [ranking,       setRanking]       = useState(false)
   const [actionMsg,     setActionMsg]     = useState('')
-  const [showPrint,     setShowPrint]     = useState(false)
+  const [showPrint,         setShowPrint]         = useState(false)
+  const [showAwardLabels,   setShowAwardLabels]   = useState(false)
+  const [relayLegs,         setRelayLegs]         = useState({})   // entryId → [{leg,athlete_id,first_name,last_name}]
+  const [expandedLegs,  setExpandedLegs]  = useState(null) // entryId whose legs panel is open
 
   useEffect(() => { api.getAthletes().then(setAthletes) }, [])
 
   useEffect(() => {
-    if (!selectedEvent) { setEventDetail(null); setResults({}); return }
+    if (!selectedEvent) { setEventDetail(null); setResults({}); setRelayLegs({}); setExpandedLegs(null); return }
     setLoading(true)
+    setRelayLegs({})
+    setExpandedLegs(null)
     api.getMeetEventEntries(selectedEvent.id).then(d => {
       setEventDetail(d)
       const init = {}
@@ -734,6 +986,10 @@ function WorksheetTab({ meet, meetDetail }) {
         }
       })
       setResults(init)
+      if (d.category === 'relay') {
+        Promise.all(d.entries.map(en => api.getRelayLegs(en.id).then(legs => [en.id, legs])))
+          .then(pairs => setRelayLegs(Object.fromEntries(pairs)))
+      }
       setLoading(false)
     })
   }, [selectedEvent])
@@ -888,12 +1144,16 @@ function WorksheetTab({ meet, meetDetail }) {
                 onClick={handleAutoRank} disabled={seeding || ranking}>
                 <RefreshCw size={12} /> {ranking ? 'Ranking…' : actionMsg || 'Auto-Rank'}
               </button>
-              {eventDetail?.entries?.length > 0 && (
+              {eventDetail?.entries?.length > 0 && (<>
+                <button className="btn btn-ghost" style={{ fontSize: 11, padding: '5px 10px' }}
+                  onClick={() => setShowAwardLabels(true)} title="Print award labels for this event">
+                  🏷 Labels
+                </button>
                 <button className="btn btn-ghost" style={{ fontSize: 11, padding: '5px 10px' }}
                   onClick={() => setShowPrint(true)} title="Print results sheet">
                   🖨 Print
                 </button>
-              )}
+              </>)}
             </div>
 
             {/* ── Athlete rows ── */}
@@ -1027,6 +1287,35 @@ function WorksheetTab({ meet, meetDetail }) {
                           />
                         </div>
                       )}
+
+                      {/* Relay legs panel */}
+                      {eventDetail.category === 'relay' && (
+                        <div style={{ paddingLeft: 30, paddingTop: 4, paddingBottom: 6 }}>
+                          <button
+                            className="btn btn-ghost"
+                            style={{ fontSize: 11, padding: '3px 8px', marginBottom: expandedLegs === en.id ? 8 : 0 }}
+                            onClick={() => setExpandedLegs(expandedLegs === en.id ? null : en.id)}>
+                            {expandedLegs === en.id ? '▲ Hide Legs' : '▼ Relay Legs'}
+                            {(relayLegs[en.id]?.length ?? 0) > 0 && (
+                              <span style={{ marginLeft: 5, color: 'var(--accent)', fontSize: 10 }}>
+                                ({relayLegs[en.id].length}/4)
+                              </span>
+                            )}
+                          </button>
+                          {expandedLegs === en.id && (
+                            <RelayLegsPanel
+                              entryId={en.id}
+                              legs={relayLegs[en.id] ?? []}
+                              athletes={athletes}
+                              onSave={async (leg, athleteId) => {
+                                await api.saveRelayLeg({ entryId: en.id, leg, athleteId })
+                                const updated = await api.getRelayLegs(en.id)
+                                setRelayLegs(prev => ({ ...prev, [en.id]: updated }))
+                              }}
+                            />
+                          )}
+                        </div>
+                      )}
                     </div>
                   )
                 })}
@@ -1098,12 +1387,33 @@ function WorksheetTab({ meet, meetDetail }) {
           onClose={() => setShowPrint(false)}
         />
       )}
+
+      {showAwardLabels && eventDetail && (() => {
+        const evDataForModal = [{
+          ...eventDetail,
+          entries: eventDetail.entries.map(en => ({
+            ...en,
+            place:          results[en.id]?.place          ?? en.place          ?? null,
+            did_not_start:  results[en.id]?.did_not_start  ?? en.did_not_start  ?? 0,
+            did_not_finish: results[en.id]?.did_not_finish ?? en.did_not_finish ?? 0,
+            disqualified:   results[en.id]?.disqualified   ?? en.disqualified   ?? 0,
+          })),
+        }]
+        return (
+          <PrintAwardLabelsModal
+            meet={meet}
+            eventsData={evDataForModal}
+            initialSelectedIds={new Set([selectedEvent.id])}
+            onClose={() => setShowAwardLabels(false)}
+          />
+        )
+      })()}
     </div>
   )
 }
 
 // ─── Event Result Card ────────────────────────────────────
-function EventResultCard({ eventDetail, onPrint, onScore, onLabels, onHeatSheet, scoring }) {
+function EventResultCard({ eventDetail, onPrint, onScore, onLabels, onHeatSheet, onAdvance, scoring }) {
   const isField  = eventDetail.category === 'field' || eventDetail.category === 'combined'
   const showWind = eventDetail.category === 'track'  || eventDetail.category === 'relay'
 
@@ -1142,6 +1452,12 @@ function EventResultCard({ eventDetail, onPrint, onScore, onLabels, onHeatSheet,
             <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 10px' }}
               onClick={onScore} disabled={scoring} title="Auto-rank this event">
               {scoring ? '…' : '⚡ Score'}
+            </button>
+          )}
+          {(eventDetail.round === 'prelim' || eventDetail.round === 'semi') && (
+            <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 10px', color: 'var(--accent)' }}
+              onClick={onAdvance} title="Advance top finishers to next round">
+              ⏩ Advance
             </button>
           )}
           {sorted.length > 0 && (
@@ -1308,6 +1624,139 @@ function TeamScoreSummary({ eventsData }) {
 }
 
 // ─── Results Tab ──────────────────────────────────────────
+function AdvanceModal({ sourceEvent, meetDetail, onClose, onAdvanced }) {
+  const candidates = meetDetail.events.filter(ev =>
+    ev.id !== sourceEvent.id &&
+    ev.tf_event_id === sourceEvent.tf_event_id &&
+    ev.gender === sourceEvent.gender &&
+    (ev.age_group || '') === (sourceEvent.age_group || '')
+  )
+  const targets = candidates.length > 0
+    ? candidates
+    : meetDetail.events.filter(ev => ev.id !== sourceEvent.id)
+
+  const validEntries = (sourceEvent.entries ?? []).filter(en =>
+    !en.scratched && en.place && !en.did_not_start && !en.did_not_finish && !en.disqualified
+  )
+  const maxN = validEntries.length
+
+  const [toEventId, setToEventId] = useState(String(targets[0]?.id ?? ''))
+  const [topN,      setTopN]      = useState(Math.min(8, maxN))
+  const [advancing, setAdvancing] = useState(false)
+  const [result,    setResult]    = useState(null)
+  const [error,     setError]     = useState('')
+
+  const handleAdvance = async () => {
+    if (!toEventId) { setError('Select a target event'); return }
+    setAdvancing(true)
+    setError('')
+    try {
+      const r = await api.advanceAthletes({ fromEventId: sourceEvent.id, toEventId: Number(toEventId), topN })
+      setResult(r)
+      onAdvanced?.()
+    } catch (e) {
+      setError(e?.message || 'Advancement failed')
+    } finally { setAdvancing(false) }
+  }
+
+  const srcLabel = [
+    sourceEvent.event_name,
+    sourceEvent.gender === 'M' ? 'Boys' : 'Girls',
+    sourceEvent.age_group,
+    (sourceEvent.round || 'final')[0].toUpperCase() + (sourceEvent.round || 'final').slice(1),
+  ].filter(Boolean).join(' · ')
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ maxWidth: 460 }}>
+        <div className="modal-header">
+          <div className="modal-title">Advance Athletes to Next Round</div>
+          <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={15} /></button>
+        </div>
+
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 18 }}>
+          From: <strong style={{ color: 'var(--text-primary)' }}>{srcLabel}</strong>
+          &emsp;{maxN} athlete{maxN !== 1 ? 's' : ''} with valid results
+        </div>
+
+        {result ? (
+          <div style={{ textAlign: 'center', padding: '16px 0' }}>
+            <div style={{ fontSize: 30, marginBottom: 10 }}>✓</div>
+            <div style={{ fontWeight: 600, fontSize: 15 }}>
+              {result.advanced} athlete{result.advanced !== 1 ? 's' : ''} advanced
+            </div>
+            {result.alreadyInEvent > 0 && (
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+                {result.alreadyInEvent} already in that event — skipped
+              </div>
+            )}
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
+              Their prelim marks are set as seeds. Go to the target event to seed and run.
+            </div>
+            <button className="btn btn-primary" style={{ marginTop: 18 }} onClick={onClose}>Done</button>
+          </div>
+        ) : maxN === 0 ? (
+          <>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+              No athletes have valid results yet. Run <strong>⚡ Score</strong> on this event first, then come back to advance.
+            </p>
+            <div className="modal-footer">
+              <button className="btn btn-ghost" onClick={onClose}>Close</button>
+            </div>
+          </>
+        ) : targets.length === 0 ? (
+          <>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+              No other events in this meet to advance to. Add a Final round event in the Events tab first.
+            </p>
+            <div className="modal-footer">
+              <button className="btn btn-ghost" onClick={onClose}>Close</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div className="form-group">
+                <label className="form-label">Advance top N athletes</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <input className="input" type="number" min={1} max={maxN}
+                    value={topN}
+                    onChange={e => setTopN(Math.max(1, Math.min(maxN, Number(e.target.value))))}
+                    style={{ width: 80 }} />
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>of {maxN} eligible</span>
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Advance to</label>
+                <select className="input" value={toEventId} onChange={e => setToEventId(e.target.value)}>
+                  {targets.map(ev => (
+                    <option key={ev.id} value={ev.id}>
+                      {ev.event_name}
+                      {ev.gender === 'M' ? ' · Boys' : ev.gender === 'F' ? ' · Girls' : ' · Mixed'}
+                      {ev.age_group ? ` · ${ev.age_group}` : ''}
+                      {' · '}{ev.round[0].toUpperCase() + ev.round.slice(1)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {error && <div style={{ fontSize: 12, color: 'var(--red)' }}>{error}</div>}
+            </div>
+
+            <div className="modal-footer">
+              <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleAdvance} disabled={advancing}>
+                {advancing ? 'Advancing…' : `Advance Top ${topN}`}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function ResultsTab({ meet, meetDetail, onScoringChange }) {
   const [eventsData,           setEventsData]           = useState([])
   const [loading,              setLoading]              = useState(false)
@@ -1317,6 +1766,8 @@ function ResultsTab({ meet, meetDetail, onScoringChange }) {
   const [showAwardLabelsEvent, setShowAwardLabelsEvent] = useState(null)
   const [showHeatSheetEvent,   setShowHeatSheetEvent]   = useState(null)
   const [scoringEventId,       setScoringEventId]       = useState(null)
+  const [scoringAll,           setScoringAll]           = useState(false)
+  const [showAdvance,          setShowAdvance]          = useState(null)
 
   const load = useCallback(() => {
     if (meetDetail.events.length === 0) { setEventsData([]); return }
@@ -1363,6 +1814,31 @@ function ResultsTab({ meet, meetDetail, onScoringChange }) {
     }
   }
 
+  const handleFullBoatLabels = async () => {
+    const needsScoring = eventsData.filter(ev =>
+      (ev.entries ?? []).some(en => !en.scratched && en.mark) &&
+      !(ev.entries ?? []).some(en => en.place)
+    )
+    if (needsScoring.length > 0) {
+      setScoringAll(true)
+      try {
+        await Promise.all(needsScoring.map(ev => api.autoRank(ev.id)))
+        const refreshed = await Promise.all(eventsData.map(ev => api.getMeetEventEntries(ev.id)))
+        const newData = refreshed.filter(Boolean)
+        setEventsData(newData)
+        const withEntries = newData.filter(e => (e.entries ?? []).some(en => !en.scratched))
+        const scored      = withEntries.filter(e => e.entries.some(en => en.place))
+        onScoringChange?.({
+          any: scored.length > 0,
+          all: withEntries.length > 0 && scored.length === withEntries.length,
+        })
+      } finally {
+        setScoringAll(false)
+      }
+    }
+    setShowAwardLabels(true)
+  }
+
   if (loading) return <div className="loading-container"><div className="loading-spinner" /></div>
 
   if (meetDetail.events.length === 0) {
@@ -1387,8 +1863,8 @@ function ResultsTab({ meet, meetDetail, onScoringChange }) {
           {completedCount} of {eventsData.length} event{eventsData.length !== 1 ? 's' : ''} with results
         </div>
         <button className="btn btn-ghost" style={{ fontSize: 12 }}
-          onClick={() => setShowAwardLabels(true)}>
-          🏷 Award Labels
+          onClick={handleFullBoatLabels} disabled={scoringAll}>
+          {scoringAll ? '⏳ Scoring…' : '🏷 Award Labels'}
         </button>
         <button className="btn btn-primary" style={{ fontSize: 12 }}
           onClick={() => setShowPrintMeet(true)}>
@@ -1404,6 +1880,7 @@ function ResultsTab({ meet, meetDetail, onScoringChange }) {
             onScore={() => handleScoreEvent(ev)}
             onLabels={() => setShowAwardLabelsEvent(ev)}
             onHeatSheet={() => setShowHeatSheetEvent(ev)}
+            onAdvance={() => setShowAdvance(ev)}
             scoring={scoringEventId === ev.id}
           />
         ))}
@@ -1451,21 +1928,45 @@ function ResultsTab({ meet, meetDetail, onScoringChange }) {
           onClose={() => setShowHeatSheetEvent(null)}
         />
       )}
+
+      {showAdvance && (
+        <AdvanceModal
+          sourceEvent={showAdvance}
+          meetDetail={meetDetail}
+          onClose={() => setShowAdvance(null)}
+          onAdvanced={() => { load(); setShowAdvance(null) }}
+        />
+      )}
     </div>
   )
 }
 
 // ─── Print Heat Sheet Modal ───────────────────────────────
 function PrintHeatSheetModal({ meet, meetDetail, onClose }) {
-  const [eventsData, setEventsData] = useState([])
-  const [loading,    setLoading]    = useState(true)
+  const [eventsData,       setEventsData]       = useState([])
+  const [relayLegsByEntry, setRelayLegsByEntry] = useState({})
+  const [loading,          setLoading]          = useState(true)
   const printRef = useRef(null)
+  const autoPrint = getAutoPrint()
 
   useEffect(() => {
     if (meetDetail.events.length === 0) { setLoading(false); return }
-    Promise.all(meetDetail.events.map(ev => api.getMeetEventEntries(ev.id)))
-      .then(data => { setEventsData(data.filter(Boolean)); setLoading(false) })
+    const hasRelays = meetDetail.events.some(ev => ev.category === 'relay')
+    Promise.all([
+      Promise.all(meetDetail.events.map(ev => api.getMeetEventEntries(ev.id))),
+      hasRelays ? api.getRelayLegsForMeet(meet.id) : Promise.resolve({}),
+    ]).then(([data, legs]) => {
+      setEventsData(data.filter(Boolean))
+      setRelayLegsByEntry(legs ?? {})
+      setLoading(false)
+    })
   }, [meetDetail.events])
+
+  useEffect(() => {
+    if (!autoPrint || loading) return
+    const t = setTimeout(() => { printSheetHtml(printRef); onClose() }, 200)
+    return () => clearTimeout(t)
+  }, [loading]) // eslint-disable-line
 
   const meetDate = new Date(meet.date + 'T00:00:00')
     .toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
@@ -1497,8 +1998,16 @@ function PrintHeatSheetModal({ meet, meetDetail, onClose }) {
       <div className="print-preview-container">
         <div className="print-toolbar no-print">
           <span style={{ fontWeight: 600, fontSize: 14 }}>Heat Sheets — Print Preview</span>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn btn-primary" onClick={() => printSheetHtml(printRef)}>🖨 Print / Save PDF</button>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {autoPrint
+              ? <span style={{ fontSize: 12, color: 'var(--text-muted)', display:'flex', alignItems:'center', gap:6 }}>
+                  <RefreshCw size={12} style={{ animation:'spin 0.8s linear infinite' }} />Sending to printer…
+                </span>
+              : <>
+                  <button className="btn btn-ghost" onClick={() => savePdfHtml(printRef, meet.name, 'Heat-Sheet')}>⬇ Save PDF</button>
+                  <button className="btn btn-primary" onClick={() => printSheetHtml(printRef)}>🖨 Print</button>
+                </>
+            }
             <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={15} /></button>
           </div>
         </div>
@@ -1578,24 +2087,39 @@ function PrintHeatSheetModal({ meet, meetDetail, onClose }) {
                         </tr>
                       </thead>
                       <tbody>
-                        {rows.map((en, i) => (
-                          <tr key={en.id} className={i % 2 === 1 ? 'ps-row-shade' : ''}>
-                            <td className="ps-td-place">{en.lane || '—'}</td>
-                            <td className="ps-td-name">{en.last_name}, {en.first_name}</td>
-                            <td style={{ padding: '5px 6px', fontSize: '9pt', color: '#555' }}>
-                              {en.team || '—'}
-                            </td>
-                            <td className="ps-td-center">{en.seed_mark || '—'}</td>
-                            {isField
-                              ? [0,1,2,3,4,5,6].map(n => <td key={n} className="hs-write-in" />)
-                              : <>
-                                  <td className="hs-write-in" />
-                                  {showWind && <td className="hs-write-in" />}
-                                  <td className="hs-write-in" />
-                                </>
-                            }
-                          </tr>
-                        ))}
+                        {rows.map((en, i) => {
+                          const legs = relayLegsByEntry[en.id] ?? []
+                          const totalCols = isField ? 11 : (showWind ? 6 : 5)
+                          return (
+                            <React.Fragment key={en.id}>
+                              <tr className={i % 2 === 1 ? 'ps-row-shade' : ''}>
+                                <td className="ps-td-place">{en.lane || '—'}</td>
+                                <td className="ps-td-name">{en.last_name}, {en.first_name}</td>
+                                <td style={{ padding: '5px 6px', fontSize: '9pt', color: '#555' }}>
+                                  {en.team || '—'}
+                                </td>
+                                <td className="ps-td-center">{en.seed_mark || '—'}</td>
+                                {isField
+                                  ? [0,1,2,3,4,5,6].map(n => <td key={n} className="hs-write-in" />)
+                                  : <>
+                                      <td className="hs-write-in" />
+                                      {showWind && <td className="hs-write-in" />}
+                                      <td className="hs-write-in" />
+                                    </>
+                                }
+                              </tr>
+                              {legs.length > 0 && (
+                                <tr className={i % 2 === 1 ? 'ps-row-shade' : ''}>
+                                  <td />
+                                  <td colSpan={totalCols - 1}
+                                    style={{ padding: '2px 6px 6px', fontSize: '8pt', color: '#666', fontStyle: 'italic' }}>
+                                    {legs.map(l => `${l.leg}. ${l.first_name} ${l.last_name}`).join('  ·  ')}
+                                  </td>
+                                </tr>
+                              )}
+                            </React.Fragment>
+                          )
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -1738,6 +2262,7 @@ function LabelContent({ lbl, variant, includeMark, meetDateStr }) {
 // ─── Print Award Labels Modal ─────────────────────────────
 // ─── Per-event Heat Sheet Modal ───────────────────────────
 function PrintEventHeatSheetModal({ meet, eventDetail, onClose }) {
+  const printRef = useRef(null)
   const isField  = eventDetail.category === 'field' || eventDetail.category === 'combined'
   const showWind = eventDetail.category === 'track'  || eventDetail.category === 'relay'
 
@@ -1773,12 +2298,13 @@ function PrintEventHeatSheetModal({ meet, eventDetail, onClose }) {
         <div className="print-toolbar no-print">
           <span style={{ fontWeight: 600, fontSize: 14 }}>{eventDetail.event_name} — Heat Sheet</span>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn btn-primary" onClick={() => window.print()}>🖨 Print / Save PDF</button>
+            <button className="btn btn-ghost" onClick={() => savePdfHtml(printRef, meet.name, 'Event-Heat-Sheet')}>⬇ Save PDF</button>
+            <button className="btn btn-primary" onClick={() => printSheetHtml(printRef)}>🖨 Print</button>
             <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={15} /></button>
           </div>
         </div>
 
-        <div className="print-sheet">
+        <div ref={printRef}><div className="print-sheet">
           <div className="ps-header">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div>
@@ -1862,7 +2388,7 @@ function PrintEventHeatSheetModal({ meet, eventDetail, onClose }) {
               )}
             </>
           )}
-        </div>
+        </div></div>
       </div>
     </div>
   )
@@ -2115,6 +2641,7 @@ function PrintMeetModal({ meet, eventsData: initData, onClose }) {
   const printRef = useRef(null)
   const [eventsData, setEventsData] = useState(initData)
   const [loading,    setLoading]    = useState(true)
+  const autoPrint = getAutoPrint()
 
   useEffect(() => {
     if (!(meet.events?.length > 0)) { setLoading(false); return }
@@ -2122,6 +2649,12 @@ function PrintMeetModal({ meet, eventsData: initData, onClose }) {
       .then(data => { setEventsData(data.filter(Boolean)); setLoading(false) })
       .catch(() => setLoading(false))
   }, [meet.events])
+
+  useEffect(() => {
+    if (!autoPrint || loading) return
+    const t = setTimeout(() => { printSheetHtml(printRef); onClose() }, 200)
+    return () => clearTimeout(t)
+  }, [loading]) // eslint-disable-line
 
   const meetDate = new Date(meet.date + 'T00:00:00')
     .toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
@@ -2150,8 +2683,16 @@ function PrintMeetModal({ meet, eventsData: initData, onClose }) {
         {/* Toolbar */}
         <div className="print-toolbar no-print">
           <span style={{ fontWeight: 600, fontSize: 14 }}>Full Meet Results — Print Preview</span>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn btn-primary" onClick={() => printSheetHtml(printRef)}>🖨 Print / Save PDF</button>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {autoPrint
+              ? <span style={{ fontSize: 12, color: 'var(--text-muted)', display:'flex', alignItems:'center', gap:6 }}>
+                  <RefreshCw size={12} style={{ animation:'spin 0.8s linear infinite' }} />Sending to printer…
+                </span>
+              : <>
+                  <button className="btn btn-ghost" onClick={() => savePdfHtml(printRef, meet.name, 'Results')}>⬇ Save PDF</button>
+                  <button className="btn btn-primary" onClick={() => printSheetHtml(printRef)}>🖨 Print</button>
+                </>
+            }
             <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={15} /></button>
           </div>
         </div>
@@ -2297,8 +2838,15 @@ function PrintMeetModal({ meet, eventsData: initData, onClose }) {
 // ─── Print Results Modal ──────────────────────────────────
 function PrintResultsModal({ meet, event, entries, results, onClose }) {
   const printRef = useRef(null)
+  const autoPrint = getAutoPrint()
   const isField  = event.category === 'field' || event.category === 'combined'
   const showWind = event.category === 'track'  || event.category === 'relay'
+
+  useEffect(() => {
+    if (!autoPrint) return
+    const t = setTimeout(() => { printSheetHtml(printRef); onClose() }, 200)
+    return () => clearTimeout(t)
+  }, []) // eslint-disable-line
 
   const sorted = [...entries].sort((a, b) => {
     const pa = results[a.id]?.place, pb = results[b.id]?.place
@@ -2332,8 +2880,16 @@ function PrintResultsModal({ meet, event, entries, results, onClose }) {
         {/* Screen-only toolbar */}
         <div className="print-toolbar no-print">
           <span style={{ fontWeight: 600, fontSize: 14 }}>Print Preview</span>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn btn-primary" onClick={() => printSheetHtml(printRef)}>🖨 Print / Save PDF</button>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {autoPrint
+              ? <span style={{ fontSize: 12, color: 'var(--text-muted)', display:'flex', alignItems:'center', gap:6 }}>
+                  <RefreshCw size={12} style={{ animation:'spin 0.8s linear infinite' }} />Sending to printer…
+                </span>
+              : <>
+                  <button className="btn btn-ghost" onClick={() => savePdfHtml(printRef, meet.name, 'Event-Results')}>⬇ Save PDF</button>
+                  <button className="btn btn-primary" onClick={() => printSheetHtml(printRef)}>🖨 Print</button>
+                </>
+            }
             <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={15} /></button>
           </div>
         </div>
@@ -2497,6 +3053,38 @@ function FieldAttempts({ attemptsJson, category, disabled, onChange }) {
 }
 
 
+function RelayLegsPanel({ entryId, legs, athletes, onSave }) {
+  const legMap = Object.fromEntries(legs.map(l => [l.leg, l]))
+  return (
+    <div className="relay-legs-panel">
+      {[1, 2, 3, 4].map(legNum => {
+        const assigned = legMap[legNum]
+        return (
+          <div key={legNum} className="relay-leg-row">
+            <span className="relay-leg-label">Leg {legNum}</span>
+            <select
+              className="input relay-leg-select"
+              value={assigned?.athlete_id ?? ''}
+              onChange={e => onSave(legNum, e.target.value ? Number(e.target.value) : null)}>
+              <option value="">— Unassigned —</option>
+              {athletes.map(a => (
+                <option key={a.id} value={a.id}>
+                  {a.last_name}, {a.first_name}{a.team ? ` (${a.team})` : ''}
+                </option>
+              ))}
+            </select>
+            {assigned && (
+              <span className="relay-leg-name">
+                {assigned.first_name} {assigned.last_name}
+              </span>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 function StatusToggle({ label, active, onToggle, disabled }) {
   return (
     <button
@@ -2508,6 +3096,477 @@ function StatusToggle({ label, active, onToggle, disabled }) {
     >
       {label}
     </button>
+  )
+}
+
+// ─── Run-a-thon: Print Modal ───────────────────────────────
+function PrintRunathonModal({ meet, entries, onClose }) {
+  const printRef = useRef(null)
+  const autoPrint = getAutoPrint()
+
+  useEffect(() => {
+    if (!autoPrint) return
+    const t = setTimeout(() => { printSheetHtml(printRef); onClose() }, 200)
+    return () => clearTimeout(t)
+  }, []) // eslint-disable-line
+
+  const meetDate = new Date(meet.date + 'T00:00:00')
+    .toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+
+  const totalLaps   = entries.reduce((s, e) => s + (e.laps  || 0), 0)
+  const totalRaised = entries.reduce((s, e) => s + ((e.laps || 0) * (e.pledge_per_lap || 0)) + (e.flat_pledges || 0), 0)
+
+  const hasPledges = entries.some(e => e.pledge_per_lap != null || e.flat_pledges != null)
+  const hasField   = entries.some(e => e.best_distance)
+
+  return (
+    <div className="print-modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="print-preview-container">
+        <div className="print-toolbar no-print">
+          <span style={{ fontWeight: 600, fontSize: 14 }}>Run-a-thon Participants — Print Preview</span>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {autoPrint
+              ? <span style={{ fontSize: 12, color: 'var(--text-muted)', display:'flex', alignItems:'center', gap:6 }}>
+                  <RefreshCw size={12} style={{ animation:'spin 0.8s linear infinite' }} />Sending to printer…
+                </span>
+              : <>
+                  <button className="btn btn-ghost" onClick={() => savePdfHtml(printRef, meet.name, 'Runathon')}>⬇ Save PDF</button>
+                  <button className="btn btn-primary" onClick={() => printSheetHtml(printRef)}>🖨 Print</button>
+                </>
+            }
+            <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={15} /></button>
+          </div>
+        </div>
+
+        <div ref={printRef}>
+          <div className="print-sheet">
+            {/* Header */}
+            <div className="ps-header">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div>
+                  <div className="ps-club-name">PEGASUS TRACK</div>
+                  <div className="ps-meet-name">{meet.name}</div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div className="ps-meet-date">{meetDate}</div>
+                  {meet.location && <div className="ps-meet-location">{meet.location}</div>}
+                </div>
+              </div>
+              <div className="ps-divider" />
+              <div className="ps-event-title">RUN-A-THON PARTICIPANTS</div>
+            </div>
+
+            {entries.length === 0 ? (
+              <p style={{ textAlign: 'center', color: '#888', padding: '40px 0' }}>No participants recorded.</p>
+            ) : (
+              <table className="ps-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: 28, textAlign: 'center' }}>#</th>
+                    <th className="ps-th-name">Name</th>
+                    <th style={{ width: 52 }}>Age Grp</th>
+                    <th style={{ width: 28 }}>G</th>
+                    <th style={{ width: 110, textAlign: 'left' }}>Team</th>
+                    <th style={{ width: 42 }}>Laps</th>
+                    {hasField  && <th style={{ width: 60 }}>Best Dist.</th>}
+                    {hasPledges && <th style={{ width: 48 }}>$/Lap</th>}
+                    {hasPledges && <th style={{ width: 54 }}>Flat $</th>}
+                    {hasPledges && <th style={{ width: 62 }}>Total</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {entries.map((entry, i) => {
+                    const name     = entry.first_name
+                      ? `${entry.last_name}, ${entry.first_name}`
+                      : (entry.guest_name || '—')
+                    const ageGrp   = entry.age ? getAgeGroup(entry.age) : '—'
+                    const gender   = entry.gender === 'M' ? 'M' : entry.gender === 'F' ? 'F' : '—'
+                    const team     = entry.team || entry.guest_team || '—'
+                    const total    = ((entry.laps || 0) * (entry.pledge_per_lap || 0)) + (entry.flat_pledges || 0)
+
+                    return (
+                      <tr key={entry.id} className={i % 2 === 1 ? 'ps-row-shade' : ''}>
+                        <td className="ps-td-center">{i + 1}</td>
+                        <td className="ps-td-name">
+                          {name}
+                          {!entry.athlete_id && <span style={{ fontSize: 7.5, color: '#888', marginLeft: 4 }}>(guest)</span>}
+                        </td>
+                        <td className="ps-td-center">{ageGrp}</td>
+                        <td className="ps-td-center">{gender}</td>
+                        <td style={{ padding: '5px 6px', fontSize: '9pt' }}>{team}</td>
+                        <td className="ps-td-center" style={{ fontWeight: entry.laps ? 600 : 400 }}>
+                          {entry.laps ?? '—'}
+                        </td>
+                        {hasField  && <td className="ps-td-center">{entry.best_distance ?? '—'}</td>}
+                        {hasPledges && <td className="ps-td-center">{entry.pledge_per_lap != null ? `$${Number(entry.pledge_per_lap).toFixed(2)}` : '—'}</td>}
+                        {hasPledges && <td className="ps-td-center">{entry.flat_pledges   != null ? `$${Number(entry.flat_pledges).toFixed(2)}`   : '—'}</td>}
+                        {hasPledges && <td className="ps-td-center" style={{ fontWeight: total > 0 ? 700 : 400 }}>
+                          {total > 0 ? `$${total.toFixed(2)}` : '—'}
+                        </td>}
+                      </tr>
+                    )
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr style={{ borderTop: '2px solid #111' }}>
+                    <td />
+                    <td style={{ padding: '6px 6px', fontWeight: 700, fontSize: '9pt' }}>
+                      TOTALS — {entries.length} participant{entries.length !== 1 ? 's' : ''}
+                    </td>
+                    <td /><td /><td />
+                    <td className="ps-td-center" style={{ fontWeight: 700 }}>{totalLaps || '—'}</td>
+                    {hasField   && <td />}
+                    {hasPledges && <td />}
+                    {hasPledges && <td />}
+                    {hasPledges && (
+                      <td className="ps-td-center" style={{ fontWeight: 700 }}>
+                        {totalRaised > 0 ? `$${totalRaised.toFixed(2)}` : '—'}
+                      </td>
+                    )}
+                  </tr>
+                </tfoot>
+              </table>
+            )}
+
+            {/* Footer */}
+            <div style={{ marginTop: 24, borderTop: '1px solid #ccc', paddingTop: 8,
+              display: 'flex', justifyContent: 'space-between', fontSize: '8pt', color: '#888' }}>
+              <span>Pegasus Track · {meetDate}</span>
+              <span>Printed {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Run-a-thon: Add Roster Modal ─────────────────────────
+function AddRosterModal({ athletes, onAdd, onClose }) {
+  const [selected, setSelected] = useState(new Set())
+  const [search,   setSearch]   = useState('')
+
+  const filtered = athletes.filter(a => {
+    const q = search.toLowerCase()
+    return !q || `${a.first_name} ${a.last_name}`.toLowerCase().includes(q) || (a.team || '').toLowerCase().includes(q)
+  })
+
+  const toggle    = (id) => setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggleAll = ()   => setSelected(s => s.size === filtered.length ? new Set() : new Set(filtered.map(a => a.id)))
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ maxWidth: 480 }}>
+        <div className="modal-header">
+          <div className="modal-title">Add Athletes from Roster</div>
+          <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={15} /></button>
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '4px 0 8px' }}>
+          <div style={{ position: 'relative', flex: 1 }}>
+            <Search size={13} style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }} />
+            <input className="input" placeholder="Search athletes…" value={search}
+              onChange={e => setSearch(e.target.value)} style={{ paddingLeft: 30 }} autoFocus />
+          </div>
+          <span style={{ fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{selected.size} selected</span>
+        </div>
+        {athletes.length === 0 ? (
+          <p style={{ color: 'var(--text-secondary)', fontSize: 13, textAlign: 'center', padding: '24px 0' }}>All roster athletes are already added.</p>
+        ) : (
+          <div style={{ maxHeight: 340, overflowY: 'auto' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 2px',
+              cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>
+              <input type="checkbox" checked={filtered.length > 0 && selected.size === filtered.length} onChange={toggleAll} />
+              Select all visible ({filtered.length})
+            </label>
+            {filtered.map(a => {
+              const age = a.date_of_birth
+                ? Math.floor((Date.now() - new Date(a.date_of_birth).getTime()) / 31557600000)
+                : null
+              return (
+                <label key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 9,
+                  padding: '7px 2px', cursor: 'pointer', borderBottom: '1px solid var(--border)' }}>
+                  <input type="checkbox" checked={selected.has(a.id)} onChange={() => toggle(a.id)} />
+                  <span style={{ flex: 1, fontSize: 13 }}>
+                    {a.first_name} {a.last_name}
+                    {age !== null && <span style={{ color: 'var(--text-muted)', marginLeft: 6, fontSize: 11 }}>({getAgeGroup(age)})</span>}
+                  </span>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{a.team}</span>
+                  <span className={`badge ${a.gender === 'M' ? 'badge-blue' : 'badge-gold'}`} style={{ fontSize: 10 }}>{a.gender === 'M' ? 'Boys' : 'Girls'}</span>
+                </label>
+              )
+            })}
+          </div>
+        )}
+        <div className="modal-footer">
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" onClick={() => onAdd([...selected])} disabled={selected.size === 0}>
+            Add {selected.size > 0 ? selected.size : ''} Athlete{selected.size !== 1 ? 's' : ''}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Run-a-thon: Participant Body ──────────────────────────
+function RunathonBody({ meet }) {
+  const [entries,     setEntries]     = useState([])
+  const [allAthletes, setAllAthletes] = useState([])
+  const [loading,     setLoading]     = useState(true)
+  const [showRoster,  setShowRoster]  = useState(false)
+  const [showPrint,   setShowPrint]   = useState(false)
+  const [guestForm,   setGuestForm]   = useState(null)
+  const [editCell,    setEditCell]    = useState(null)
+  const [editVal,     setEditVal]     = useState('')
+
+  const load = useCallback(async () => {
+    try { setEntries(await api.getRunathonEntries(meet.id) || []) }
+    catch (e) { console.error('runathon load', e) }
+    setLoading(false)
+  }, [meet.id])
+
+  useEffect(() => {
+    load()
+    if (window.electronAPI) api.getAthletes().then(a => setAllAthletes((a || []).filter(x => x.active)))
+  }, [load])
+
+  const addedIds        = useMemo(() => new Set(entries.filter(e => e.athlete_id).map(e => e.athlete_id)), [entries])
+  const availableRoster = useMemo(() => allAthletes.filter(a => !addedIds.has(a.id)), [allAthletes, addedIds])
+
+  const totalLaps   = entries.reduce((s, e) => s + (e.laps || 0), 0)
+  const lapLeader   = [...entries].filter(e => e.laps > 0).sort((a, b) => b.laps - a.laps)[0]
+  const MONEY_FIELDS = new Set(['pledge_per_lap', 'flat_pledges'])
+  const NUM_FIELDS   = new Set(['laps', 'pledge_per_lap', 'flat_pledges'])
+
+  function entryTotal(e) {
+    return ((e.laps || 0) * (e.pledge_per_lap || 0)) + (e.flat_pledges || 0)
+  }
+  const totalRaised = entries.reduce((s, e) => s + entryTotal(e), 0)
+  const fmtMoney    = (v) => v > 0 ? `$${v.toFixed(2)}` : '—'
+
+  const startEdit = (id, field, val) => { setEditCell({ id, field }); setEditVal(val ?? '') }
+
+  const commitEdit = async () => {
+    if (!editCell) return
+    const entry = entries.find(e => e.id === editCell.id)
+    if (!entry) { setEditCell(null); return }
+    const val = NUM_FIELDS.has(editCell.field) ? (parseFloat(editVal) || null) : (editVal.trim() || null)
+    try {
+      const updated = await api.upsertRunathonEntry({ ...entry, [editCell.field]: val })
+      setEntries(es => es.map(e => e.id === updated.id ? updated : e))
+    } catch (e) { console.error(e) }
+    setEditCell(null)
+  }
+
+  const handleRemove = async (id) => {
+    await api.removeRunathonEntry(id)
+    setEntries(es => es.filter(e => e.id !== id))
+  }
+
+  const handleAddRoster = async (ids) => {
+    if (!ids.length) { setShowRoster(false); return }
+    const updated = await api.bulkAddRunathonAthletes({ meetId: meet.id, athleteIds: ids })
+    if (updated) setEntries(updated)
+    setShowRoster(false)
+  }
+
+  const handleAddGuest = async () => {
+    if (!guestForm?.name?.trim()) return
+    const entry = await api.upsertRunathonEntry({
+      meet_id: meet.id, guest_name: guestForm.name.trim(), guest_team: guestForm.team || null,
+    })
+    if (entry) setEntries(es => [...es, entry])
+    setGuestForm(null)
+  }
+
+  if (loading) return <div className="loading-container"><div className="loading-spinner" /></div>
+
+  return (
+    <div className="runathon-body">
+      {/* Summary bar */}
+      <div className="runathon-summary">
+        <div className="runathon-stat">
+          <span className="runathon-stat-val">{entries.length}</span>
+          <span className="runathon-stat-lbl">Participants</span>
+        </div>
+        <div className="runathon-sdiv" />
+        <div className="runathon-stat">
+          <span className="runathon-stat-val">{totalLaps || '—'}</span>
+          <span className="runathon-stat-lbl">Total Laps</span>
+        </div>
+        <div className="runathon-sdiv" />
+        <div className="runathon-stat">
+          <span className="runathon-stat-val" style={{ color: 'var(--green)' }}>
+            {totalRaised > 0 ? `$${totalRaised.toFixed(2)}` : '—'}
+          </span>
+          <span className="runathon-stat-lbl">Total Raised</span>
+        </div>
+        {lapLeader && (
+          <>
+            <div className="runathon-sdiv" />
+            <div className="runathon-stat">
+              <span className="runathon-stat-val">{lapLeader.laps}</span>
+              <span className="runathon-stat-lbl">Top Laps</span>
+            </div>
+            <div className="runathon-sdiv" />
+            <div className="runathon-stat">
+              <span className="runathon-stat-val" style={{ fontSize: 14 }}>
+                {lapLeader.first_name ? `${lapLeader.first_name} ${lapLeader.last_name}` : lapLeader.guest_name}
+              </span>
+              <span className="runathon-stat-lbl">Leader</span>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Actions */}
+      <div className="runathon-actions">
+        <button className="btn btn-primary" style={{ fontSize: 13 }} onClick={() => setShowRoster(true)}>
+          <Users size={13} /> Add Athletes from Roster
+        </button>
+        <button className="btn btn-ghost" style={{ fontSize: 13 }} onClick={() => setGuestForm({ name: '', team: '' })}>
+          <Plus size={13} /> Add Guest
+        </button>
+        {entries.length > 0 && (
+          <button className="btn btn-ghost" style={{ fontSize: 13, marginLeft: 'auto' }}
+            onClick={() => setShowPrint(true)}>
+            🖨 Print Participants
+          </button>
+        )}
+      </div>
+
+      {/* Guest inline form */}
+      {guestForm && (
+        <div className="runathon-guest-form">
+          <input className="input" placeholder="Guest name" value={guestForm.name}
+            onChange={e => setGuestForm(f => ({ ...f, name: e.target.value }))}
+            onKeyDown={e => e.key === 'Enter' && handleAddGuest()} autoFocus />
+          <input className="input" placeholder="Club / Team (optional)" value={guestForm.team}
+            onChange={e => setGuestForm(f => ({ ...f, team: e.target.value }))}
+            onKeyDown={e => e.key === 'Enter' && handleAddGuest()} />
+          <button className="btn btn-primary" style={{ fontSize: 13 }} onClick={handleAddGuest}>Add</button>
+          <button className="btn btn-ghost" style={{ fontSize: 13 }} onClick={() => setGuestForm(null)}>Cancel</button>
+        </div>
+      )}
+
+      {/* Participant table */}
+      {entries.length === 0 ? (
+        <div className="empty-state" style={{ padding: '48px 0' }}>
+          <Users size={40} style={{ opacity: 0.25, marginBottom: 10 }} />
+          <p style={{ fontSize: 13 }}>No participants yet. Add athletes from the roster or enter a guest.</p>
+        </div>
+      ) : (
+        <div className="runathon-table-wrap">
+          <table className="runathon-table">
+            <thead>
+              <tr>
+                <th style={{ width: 36 }}>#</th>
+                <th>Name</th>
+                <th>Age Grp</th>
+                <th>Team</th>
+                <th style={{ width: 72 }}>Laps</th>
+                <th style={{ width: 100 }}>Best Dist.</th>
+                <th style={{ width: 80 }}>$/Lap</th>
+                <th style={{ width: 88 }}>Flat $</th>
+                <th style={{ width: 88 }}>Total</th>
+                <th>Notes</th>
+                <th style={{ width: 32 }} />
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map((entry, i) => {
+                const isGuest   = !entry.athlete_id
+                const name      = entry.first_name ? `${entry.last_name}, ${entry.first_name}` : (entry.guest_name || '—')
+                const ageGroup  = entry.age ? getAgeGroup(entry.age) : '—'
+                const teamLabel = entry.team || entry.guest_team || '—'
+                const isEditing = (f) => editCell?.id === entry.id && editCell?.field === f
+
+                const fieldVal = (f) => entry[f] ?? null
+                const cellProps = (field) => ({
+                  className: 'runathon-cell',
+                  onClick: () => !isEditing(field) && startEdit(entry.id, field, fieldVal(field)),
+                })
+
+                const inlineInput = (field, placeholder, type = 'text') => (
+                  <input
+                    className="runathon-inline-input"
+                    type={type} value={editVal}
+                    placeholder={placeholder}
+                    onChange={e => setEditVal(e.target.value)}
+                    onBlur={commitEdit}
+                    onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditCell(null) }}
+                    autoFocus onClick={e => e.stopPropagation()}
+                    {...(type === 'number' ? { min: 0, step: 0.5 } : {})}
+                  />
+                )
+
+                return (
+                  <tr key={entry.id} className={isGuest ? 'runathon-guest-row' : ''}>
+                    <td className="runathon-row-num">{i + 1}</td>
+                    <td className="runathon-name-cell">
+                      {name}
+                      {isGuest && <span className="badge badge-neutral" style={{ marginLeft: 6, fontSize: 10 }}>Guest</span>}
+                    </td>
+                    <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{ageGroup}</td>
+                    <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{teamLabel}</td>
+                    <td {...cellProps('laps')}>
+                      {isEditing('laps')
+                        ? inlineInput('laps', '0', 'number')
+                        : <span className={entry.laps != null ? 'runathon-val' : 'runathon-empty'}>{entry.laps ?? '—'}</span>}
+                    </td>
+                    <td {...cellProps('best_distance')}>
+                      {isEditing('best_distance')
+                        ? inlineInput('best_distance', 'e.g. 16-4')
+                        : <span className={entry.best_distance ? 'runathon-val' : 'runathon-empty'}>{entry.best_distance ?? '—'}</span>}
+                    </td>
+                    <td {...cellProps('pledge_per_lap')}>
+                      {isEditing('pledge_per_lap')
+                        ? inlineInput('pledge_per_lap', '0.00', 'number')
+                        : <span className={entry.pledge_per_lap != null ? 'runathon-val runathon-money' : 'runathon-empty'}>
+                            {entry.pledge_per_lap != null ? `$${Number(entry.pledge_per_lap).toFixed(2)}` : '—'}
+                          </span>}
+                    </td>
+                    <td {...cellProps('flat_pledges')}>
+                      {isEditing('flat_pledges')
+                        ? inlineInput('flat_pledges', '0.00', 'number')
+                        : <span className={entry.flat_pledges != null ? 'runathon-val runathon-money' : 'runathon-empty'}>
+                            {entry.flat_pledges != null ? `$${Number(entry.flat_pledges).toFixed(2)}` : '—'}
+                          </span>}
+                    </td>
+                    <td style={{ padding: '6px 12px' }}>
+                      {(() => {
+                        const t = entryTotal(entry)
+                        return t > 0
+                          ? <span className="runathon-total">${t.toFixed(2)}</span>
+                          : <span className="runathon-empty">—</span>
+                      })()}
+                    </td>
+                    <td {...cellProps('notes')}>
+                      {isEditing('notes')
+                        ? inlineInput('notes', 'Optional note')
+                        : <span className={entry.notes ? 'runathon-val' : 'runathon-empty'}>{entry.notes ?? '—'}</span>}
+                    </td>
+                    <td>
+                      <button className="btn btn-ghost btn-icon" style={{ color: 'var(--red)', opacity: 0.6 }}
+                        onClick={() => handleRemove(entry.id)} title="Remove">
+                        <X size={13} />
+                      </button>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {showRoster && (
+        <AddRosterModal athletes={availableRoster} onAdd={handleAddRoster} onClose={() => setShowRoster(false)} />
+      )}
+      {showPrint && (
+        <PrintRunathonModal meet={meet} entries={entries} onClose={() => setShowPrint(false)} />
+      )}
+    </div>
   )
 }
 
@@ -2537,7 +3596,31 @@ function MeetDetail({ meet, onBack, onMeetUpdated }) {
     }
   }, [loadDetail])
 
-  const [scoringState, setScoringState] = useState({ any: false, all: false })
+  const [scoringState,        setScoringState]        = useState({ any: false, all: false })
+  const [showMeetLabels,      setShowMeetLabels]      = useState(false)
+  const [meetLabelsData,      setMeetLabelsData]      = useState([])
+  const [loadingLabels,       setLoadingLabels]       = useState(false)
+
+  const handleOpenMeetLabels = async () => {
+    setLoadingLabels(true)
+    try {
+      const raw = await Promise.all(meetDetail.events.map(ev => api.getMeetEventEntries(ev.id)))
+      let evData = raw.filter(Boolean)
+      const needsScoring = evData.filter(ev =>
+        (ev.entries ?? []).some(en => !en.scratched && en.mark) &&
+        !(ev.entries ?? []).some(en => en.place)
+      )
+      if (needsScoring.length > 0) {
+        await Promise.all(needsScoring.map(ev => api.autoRank(ev.id)))
+        const refreshed = await Promise.all(evData.map(ev => api.getMeetEventEntries(ev.id)))
+        evData = refreshed.filter(Boolean)
+      }
+      setMeetLabelsData(evData)
+      setShowMeetLabels(true)
+    } finally {
+      setLoadingLabels(false)
+    }
+  }
 
   const handleStatusChange = async (status) => {
     const updated = await api.updateMeet(meet.id, { ...meet, status })
@@ -2603,6 +3686,9 @@ function MeetDetail({ meet, onBack, onMeetUpdated }) {
               <span style={{ width: 6, height: 6, borderRadius: '50%', background: sc.dot, marginRight: 4 }} />
               {sc.label}
             </span>
+            {meetDetail.type === 'runathon' && (
+              <span className="badge badge-purple">Run-a-thon</span>
+            )}
           </div>
         </div>
 
@@ -2616,49 +3702,62 @@ function MeetDetail({ meet, onBack, onMeetUpdated }) {
               Mark {STATUS_CFG[s].label}
             </button>
           ))}
-          <button className="btn btn-ghost" style={{ fontSize: 12 }}
-            onClick={() => setShowHeatSheet(true)} title="Print heat sheets">
-            🖨 Heat Sheets
-          </button>
+          {meetDetail.type !== 'runathon' && (<>
+            <button className="btn btn-ghost" style={{ fontSize: 12 }}
+              onClick={() => setShowHeatSheet(true)} title="Print heat sheets">
+              🖨 Heat Sheets
+            </button>
+            <button className="btn btn-ghost" style={{ fontSize: 12 }}
+              onClick={handleOpenMeetLabels} disabled={loadingLabels || meetDetail.events.length === 0}
+              title="Print award labels for all events">
+              {loadingLabels ? '⏳…' : '🏷 Award Labels'}
+            </button>
+          </>)}
           <button className="btn btn-ghost btn-icon" onClick={() => setEditingMeet(true)} title="Edit meet">
             <Edit2 size={14} />
           </button>
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="meets-tabs">
-        {[
-          { key: 'events',    label: 'Events',           icon: List },
-          { key: 'worksheet', label: 'Entries & Results', icon: Users },
-          { key: 'results',   label: 'Results',           icon: Trophy },
-        ].map(({ key, label, icon: Icon }) => (
-          <button key={key} className={`meets-tab${tab === key ? ' active' : ''}`} onClick={() => setTab(key)}>
-            <Icon size={13} /> {label}
-            {key === 'events' && (
-              <span className="badge badge-blue" style={{ fontSize: 10, padding: '0 5px', marginLeft: 4 }}>
-                {meetDetail.events.length}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
+      {meetDetail.type === 'runathon' ? (
+        <RunathonBody meet={meetDetail} />
+      ) : (
+        <>
+          {/* Tabs */}
+          <div className="meets-tabs">
+            {[
+              { key: 'events',    label: 'Events',           icon: List },
+              { key: 'worksheet', label: 'Entries & Results', icon: Users },
+              { key: 'results',   label: 'Results',           icon: Trophy },
+            ].map(({ key, label, icon: Icon }) => (
+              <button key={key} className={`meets-tab${tab === key ? ' active' : ''}`} onClick={() => setTab(key)}>
+                <Icon size={13} /> {label}
+                {key === 'events' && (
+                  <span className="badge badge-blue" style={{ fontSize: 10, padding: '0 5px', marginLeft: 4 }}>
+                    {meetDetail.events.length}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
 
-      {/* Tab content */}
-      <div className="meets-tab-body">
-        {tab === 'events' && (
-          <EventsTab
-            meet={meetDetail} meetDetail={meetDetail} tfEvents={tfEvents}
-            onEventAdded={handleEventAdded} onEventRemoved={handleEventRemoved}
-          />
-        )}
-        {tab === 'worksheet' && (
-          <WorksheetTab meet={meetDetail} meetDetail={meetDetail} />
-        )}
-        {tab === 'results' && (
-          <ResultsTab meet={meetDetail} meetDetail={meetDetail} onScoringChange={handleScoringChange} />
-        )}
-      </div>
+          {/* Tab content */}
+          <div className="meets-tab-body">
+            {tab === 'events' && (
+              <EventsTab
+                meet={meetDetail} meetDetail={meetDetail} tfEvents={tfEvents}
+                onEventAdded={handleEventAdded} onEventRemoved={handleEventRemoved}
+              />
+            )}
+            {tab === 'worksheet' && (
+              <WorksheetTab meet={meetDetail} meetDetail={meetDetail} />
+            )}
+            {tab === 'results' && (
+              <ResultsTab meet={meetDetail} meetDetail={meetDetail} onScoringChange={handleScoringChange} />
+            )}
+          </div>
+        </>
+      )}
 
       {editingMeet && (
         <MeetModal
@@ -2681,18 +3780,27 @@ function MeetDetail({ meet, onBack, onMeetUpdated }) {
           onClose={() => setShowHeatSheet(false)}
         />
       )}
+
+      {showMeetLabels && (
+        <PrintAwardLabelsModal
+          meet={meetDetail}
+          eventsData={meetLabelsData}
+          onClose={() => setShowMeetLabels(false)}
+        />
+      )}
     </div>
   )
 }
 
 // ─── Meets (main page) ────────────────────────────────────
 export default function Meets() {
-  const [meets,   setMeets]   = useState([])
-  const [seasons, setSeasons] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [showAdd, setShowAdd] = useState(false)
+  const [meets,        setMeets]        = useState([])
+  const [seasons,      setSeasons]      = useState([])
+  const [loading,      setLoading]      = useState(true)
+  const [showAdd,      setShowAdd]      = useState(false)
   const [selectedMeet, setSelectedMeet] = useState(null)
-  const [deleting, setDeleting] = useState(null)
+  const [deleting,     setDeleting]     = useState(null)
+  const [importing,    setImporting]    = useState(false)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -2700,6 +3808,39 @@ export default function Meets() {
       .then(([m, s]) => { setMeets(m); setSeasons(s); setLoading(false) })
       .catch(() => setLoading(false))
   }, [])
+
+  const handleImportTCL = async () => {
+    setImporting(true)
+    try {
+      const result = await api.importTCLMeet()
+      if (!result) return
+      if (result.error) { alert(`Import failed:\n${result.error}`); return }
+      const { meetId, eventsAdded, entriesAdded, resultsAdded, skippedEvents,
+              skippedNoEvent, skippedNoAthlete, skippedDupe, athFound, athInserted, teamCounts, insertErrors, sampleNonPegasus } = result
+      const teamLine = teamCounts ? '\n\nAthletes in file:\n' + Object.entries(teamCounts).map(([t,n])=>`  ${t}: ${n}`).join('\n') : ''
+      const skipLine = (skippedNoEvent || skippedNoAthlete || skippedDupe)
+        ? `\n\nSkipped entries:\n  No event match: ${skippedNoEvent ?? 0}\n  No athlete: ${skippedNoAthlete ?? 0}\n  Duplicate: ${skippedDupe ?? 0}`
+        : ''
+      const unmatched = skippedEvents?.length ? `\n\nUnmatched events:\n${[...new Set(skippedEvents)].join(', ')}` : ''
+      const errLine = insertErrors?.length ? `\n\nINSERT ERRORS (${insertErrors.length}):\n${insertErrors.slice(0,5).join('\n')}` : ''
+      const notInMap = result.athNotInMap ?? 0
+      const nonPegLine = sampleNonPegasus?.length
+        ? `\n\nNon-Pegasus in parser (first 5):\n${sampleNonPegasus.join('\n')}`
+        : '\n\n[No non-Pegasus athletes found by parser]'
+      const visitingInDB = result.visitingInDB || []
+      const dbLine = visitingInDB.length
+        ? `\n\nNon-Pegasus in DB after import:\n${visitingInDB.map(r=>`  ${r.team}: ${r.cnt}`).join('\n')}`
+        : '\n\n[Zero non-Pegasus athletes in DB after import]'
+      alert(`Import complete!\n\nEvents: ${eventsAdded}   Entries: ${entriesAdded}   Results: ${resultsAdded}\nAthletes — found in DB: ${athFound ?? 0}   newly added: ${athInserted ?? 0}   num not in parser map: ${notInMap}${teamLine}${nonPegLine}${dbLine}${skipLine}${unmatched}${errLine}`)
+
+      const allMeets = await api.getMeets()
+      setMeets(allMeets)
+      const newMeet = allMeets.find(m => m.id === meetId)
+      if (newMeet) setSelectedMeet(newMeet)
+    } finally {
+      setImporting(false)
+    }
+  }
 
   useEffect(() => { load() }, [load])
 
@@ -2731,9 +3872,14 @@ export default function Meets() {
             {upcoming.length > 0 && ` · ${upcoming.length} upcoming`}
           </div>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowAdd(true)}>
-          <Plus size={14} /> New Meet
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-ghost" onClick={handleImportTCL} disabled={importing}>
+            {importing ? 'Importing…' : 'Import Hy-Tek'}
+          </button>
+          <button className="btn btn-primary" onClick={() => setShowAdd(true)}>
+            <Plus size={14} /> New Meet
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -2829,7 +3975,10 @@ function MeetCard({ meet, onSelect, onDelete }) {
         <div className="meet-card-meta">
           {meet.location && <span><MapPin size={10} style={{ verticalAlign: 'middle' }} /> {meet.location}</span>}
           {meet.season_name && <span>{meet.season_name}</span>}
-          <span style={{ textTransform: 'capitalize' }}>{meet.type}</span>
+          {meet.type === 'runathon'
+            ? <span className="badge badge-purple" style={{ fontSize: 10 }}>Run-a-thon</span>
+            : <span style={{ textTransform: 'capitalize' }}>{meet.type}</span>
+          }
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
           <span className={`badge ${sc.badge}`} style={{ fontSize: 10 }}>

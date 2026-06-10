@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { Search, UserPlus, Edit2, Trash2, X, Pencil, Upload, MapPin, User, Calendar } from 'lucide-react'
 import { athleteApi } from '../mockStore.js'
+import { useSettings } from '../SettingsContext.jsx'
 
 const api = window.electronAPI ?? athleteApi
 
@@ -21,6 +22,7 @@ function calcAge(dob) {
 
 // ─── Athlete Form Modal ───────────────────────────────────────
 function AthleteModal({ athlete, teams, onSave, onClose }) {
+  const { homeTeam } = useSettings()
   const isEditing = !!athlete?.id
   const [form, setForm] = useState({
     first_name:     athlete?.first_name     ?? '',
@@ -28,8 +30,16 @@ function AthleteModal({ athlete, teams, onSave, onClose }) {
     date_of_birth:  athlete?.date_of_birth  ?? '',
     gender:         athlete?.gender         ?? '',
     athlete_number: athlete?.athlete_number ?? '',
-    team:           athlete?.team           ?? 'Pegasus Track',
+    team:           athlete?.team           ?? homeTeam,
     notes:          athlete?.notes          ?? '',
+    ec1_name: athlete?.ec1_name ?? '',
+    ec1_rel:  athlete?.ec1_rel  ?? '',
+    ec1_ph:   athlete?.ec1_ph   ?? '',
+    ec1_ph2:  athlete?.ec1_ph2  ?? '',
+    ec2_name: athlete?.ec2_name ?? '',
+    ec2_rel:  athlete?.ec2_rel  ?? '',
+    ec2_ph:   athlete?.ec2_ph   ?? '',
+    medical:  athlete?.medical  ?? '',
   })
   const [errors, setErrors] = useState({})
   const [saving, setSaving] = useState(false)
@@ -122,7 +132,7 @@ function AthleteModal({ athlete, teams, onSave, onClose }) {
               list="team-suggestions"
               value={form.team}
               onChange={e => set('team', e.target.value)}
-              placeholder="Pegasus Track"
+              placeholder={homeTeam}
             />
             <datalist id="team-suggestions">
               {teams.map(t => <option key={t} value={t} />)}
@@ -150,7 +160,69 @@ function AthleteModal({ athlete, teams, onSave, onClose }) {
           </label>
           <textarea className="input" value={form.notes}
             onChange={e => set('notes', e.target.value)}
-            placeholder="Any notes about this athlete..." rows={3} />
+            placeholder="Any notes about this athlete..." rows={2} />
+        </div>
+
+        {/* Emergency Contacts */}
+        <div style={{
+          marginTop: 20, paddingTop: 14,
+          borderTop: '1px solid var(--border)',
+          fontFamily: 'var(--font-display)', fontSize: 11, fontWeight: 600,
+          letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)',
+          marginBottom: 12,
+        }}>Emergency Contacts</div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 8 }}>
+          <div className="form-group" style={{ gridColumn: 'span 2' }}>
+            <label className="form-label">Contact 1 — Full Name</label>
+            <input className="input" value={form.ec1_name}
+              onChange={e => set('ec1_name', e.target.value)} placeholder="Parent / Guardian name" />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Relationship</label>
+            <input className="input" value={form.ec1_rel}
+              onChange={e => set('ec1_rel', e.target.value)} placeholder="Mother, Father…" />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Phone</label>
+            <input className="input" type="tel" value={form.ec1_ph}
+              onChange={e => set('ec1_ph', e.target.value)} placeholder="(555) 555-5555" />
+          </div>
+          <div className="form-group" style={{ gridColumn: 'span 2' }}>
+            <label className="form-label">Phone 2 &nbsp;<span style={{ color: 'var(--text-muted)', textTransform: 'none', letterSpacing: 0 }}>Optional</span></label>
+            <input className="input" type="tel" value={form.ec1_ph2}
+              onChange={e => set('ec1_ph2', e.target.value)} placeholder="Alternate number" />
+          </div>
+
+          <div className="form-group" style={{ gridColumn: 'span 2', marginTop: 4 }}>
+            <label className="form-label">Contact 2 — Full Name &nbsp;<span style={{ color: 'var(--text-muted)', textTransform: 'none', letterSpacing: 0 }}>Optional</span></label>
+            <input className="input" value={form.ec2_name}
+              onChange={e => set('ec2_name', e.target.value)} placeholder="Second contact name" />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Relationship</label>
+            <input className="input" value={form.ec2_rel}
+              onChange={e => set('ec2_rel', e.target.value)} placeholder="Mother, Father…" />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Phone</label>
+            <input className="input" type="tel" value={form.ec2_ph}
+              onChange={e => set('ec2_ph', e.target.value)} placeholder="(555) 555-5555" />
+          </div>
+        </div>
+
+        {/* Medical Notes */}
+        <div style={{
+          marginTop: 8, paddingTop: 14,
+          borderTop: '1px solid var(--border)',
+          fontFamily: 'var(--font-display)', fontSize: 11, fontWeight: 600,
+          letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)',
+          marginBottom: 12,
+        }}>Medical Notes &nbsp;<span style={{ textTransform: 'none', letterSpacing: 0, fontFamily: 'var(--font-body)', fontWeight: 400, color: 'var(--text-muted)' }}>Optional</span></div>
+        <div className="form-group">
+          <textarea className="input" value={form.medical}
+            onChange={e => set('medical', e.target.value)}
+            placeholder="Allergies, conditions, medications, or other medical information…" rows={2} />
         </div>
 
         <div className="modal-footer">
@@ -526,8 +598,35 @@ function TeamProfileModal({ teamName, profile, onSave, onClose }) {
 
 // ─── Athlete Profile Panel ────────────────────────────────────
 const CATEGORY_LABELS = { track: 'Track', relay: 'Relay', field: 'Field', combined: 'Combined' }
+const CAT_COLORS = { track: 'var(--accent)', relay: '#a78bfa', field: '#34d399', combined: '#f59e0b' }
 
-function AthleteProfilePanel({ athlete, prs, loading, onClose }) {
+function fmtProfileDate(d) {
+  if (!d) return ''
+  try { return new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) }
+  catch { return d }
+}
+
+function PlaceBadge({ place }) {
+  if (!place) return null
+  const bg = place === 1 ? '#d97706' : place === 2 ? '#6b7280' : place === 3 ? '#92400e' : null
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      width: 22, height: 22, borderRadius: '50%', fontSize: 11, fontWeight: 700, flexShrink: 0,
+      background: bg || 'var(--bg-tertiary)', color: bg ? '#fff' : 'var(--text-muted)',
+    }}>{place}</span>
+  )
+}
+
+function AthleteProfilePanel({ athlete, profile, loading, onClose }) {
+  const { homeTeam } = useSettings()
+  const [tab, setTab] = useState('prs')
+  const [expandedMeet, setExpandedMeet] = useState(null)
+
+  const prs     = profile?.prs     ?? []
+  const history = profile?.history  ?? []
+  const stats   = profile?.stats    ?? { meets: 0, events: 0, prs: 0 }
+
   const grouped = {}
   for (const pr of prs) {
     const cat = pr.category || 'track'
@@ -539,11 +638,10 @@ function AthleteProfilePanel({ athlete, prs, loading, onClose }) {
   return (
     <>
       <div onClick={onClose} style={{
-        position: 'fixed', inset: 0, zIndex: 400,
-        background: 'rgba(0,0,0,0.4)',
+        position: 'fixed', inset: 0, zIndex: 400, background: 'rgba(0,0,0,0.4)',
       }} />
       <div style={{
-        position: 'fixed', right: 0, top: 0, bottom: 0, width: 360, zIndex: 401,
+        position: 'fixed', right: 0, top: 0, bottom: 0, width: 520, zIndex: 401,
         background: 'var(--bg-secondary)',
         borderLeft: '1px solid var(--border-light)',
         boxShadow: 'var(--shadow-lg)',
@@ -558,47 +656,72 @@ function AthleteProfilePanel({ athlete, prs, loading, onClose }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div
               className={`avatar avatar-${athlete.gender === 'M' ? 'male' : 'female'}`}
-              style={{ width: 48, height: 48, fontSize: 17 }}
+              style={{ width: 52, height: 52, fontSize: 18 }}
             >
               {athlete.first_name[0]}{athlete.last_name[0]}
             </div>
             <div>
-              <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 700, lineHeight: 1.1 }}>
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 700, lineHeight: 1.1 }}>
                 {athlete.last_name.toUpperCase()}, {athlete.first_name}
               </div>
               <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 3 }}>
                 Age {athlete.age} · {athlete.gender === 'M' ? 'Male' : 'Female'} · {getAgeGroup(athlete.age)}
+                {athlete.athlete_number ? <span> · #{athlete.athlete_number}</span> : null}
               </div>
               <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 1 }}>
-                {athlete.team || 'Pegasus Track'}
+                {athlete.team || homeTeam}
+                {athlete.date_of_birth ? <span> · Born {fmtProfileDate(athlete.date_of_birth)}</span> : null}
               </div>
             </div>
           </div>
           <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={15} /></button>
         </div>
 
-        {/* PR list */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
-          <div style={{
-            fontFamily: 'var(--font-display)', fontSize: 11, fontWeight: 600,
-            letterSpacing: '0.1em', textTransform: 'uppercase',
-            color: 'var(--text-muted)', marginBottom: 14,
-          }}>
-            Personal Bests
-          </div>
+        {/* Stats strip */}
+        <div style={{ display: 'flex', gap: 1, background: 'var(--border)', borderBottom: '1px solid var(--border)' }}>
+          {[
+            { label: 'Meets',  value: stats.meets  },
+            { label: 'Events', value: stats.events },
+            { label: 'PRs',    value: stats.prs    },
+          ].map(s => (
+            <div key={s.label} style={{ flex: 1, textAlign: 'center', padding: '10px 0', background: 'var(--bg-secondary)' }}>
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 700, color: 'var(--accent)' }}>
+                {loading ? '—' : s.value}
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                {s.label}
+              </div>
+            </div>
+          ))}
+        </div>
 
+        {/* Tabs */}
+        <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', padding: '0 20px' }}>
+          {[['prs', 'Personal Bests'], ['history', 'Meet History'], ['contact', 'Contact']].map(([key, label]) => (
+            <button key={key} onClick={() => setTab(key)} style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              padding: '10px 16px 8px', fontSize: 13, fontWeight: 600,
+              color: tab === key ? 'var(--accent)' : 'var(--text-muted)',
+              borderBottom: tab === key ? '2px solid var(--accent)' : '2px solid transparent',
+              marginBottom: -1, transition: 'color 0.15s',
+            }}>{label}</button>
+          ))}
+        </div>
+
+        {/* Body */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
           {loading ? (
             <div className="loading-container" style={{ height: 120 }}><div className="loading-spinner" /></div>
-          ) : prs.length === 0 ? (
-            <div style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', paddingTop: 32 }}>
-              No personal bests recorded yet.
-            </div>
-          ) : (
-            cats.map(cat => (
+          ) : tab === 'prs' ? (
+            prs.length === 0 ? (
+              <div style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', paddingTop: 40 }}>
+                No personal bests recorded yet.
+              </div>
+            ) : cats.map(cat => (
               <div key={cat} style={{ marginBottom: 20 }}>
                 <div style={{
                   fontSize: 10, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase',
-                  color: 'var(--text-muted)', paddingBottom: 6,
+                  color: CAT_COLORS[cat], paddingBottom: 6,
                   borderBottom: '1px solid var(--border)', marginBottom: 8,
                 }}>
                   {CATEGORY_LABELS[cat]}
@@ -606,19 +729,156 @@ function AthleteProfilePanel({ athlete, prs, loading, onClose }) {
                 {grouped[cat].map(pr => (
                   <div key={pr.event_name} style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    padding: '8px 0', borderBottom: '1px solid rgba(28,40,71,0.5)',
+                    padding: '9px 0', borderBottom: '1px solid rgba(28,40,71,0.5)',
                   }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                      <span style={{ fontSize: 13, fontWeight: 500 }}>{pr.event_name}</span>
-                      {pr.indoor ? <span className="badge badge-neutral" style={{ fontSize: 10 }}>Indoor</span> : null}
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                        <span style={{ fontSize: 13, fontWeight: 500 }}>{pr.event_name}</span>
+                        {pr.indoor ? <span className="badge badge-neutral" style={{ fontSize: 10 }}>Indoor</span> : null}
+                      </div>
+                      {(pr.meet_name || pr.meet_date || pr.date) && (
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                          {pr.meet_name}{pr.meet_name && (pr.meet_date || pr.date) ? ' · ' : ''}
+                          {fmtProfileDate(pr.meet_date || pr.date)}
+                        </div>
+                      )}
                     </div>
-                    <span style={{ fontFamily: 'var(--font-display)', fontSize: 17, fontWeight: 700, color: 'var(--accent)' }}>
+                    <span style={{ fontFamily: 'var(--font-display)', fontSize: 19, fontWeight: 700, color: 'var(--accent)' }}>
                       {pr.mark}
                     </span>
                   </div>
                 ))}
               </div>
             ))
+          ) : tab === 'history' ? (
+            history.length === 0 ? (
+              <div style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', paddingTop: 40 }}>
+                No competition history yet.
+              </div>
+            ) : history.map(meet => {
+              const isOpen = expandedMeet === meet.meet_id
+              const hasPR  = meet.results.some(r => r.is_pr)
+              return (
+                <div key={meet.meet_id} style={{
+                  marginBottom: 8, border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden',
+                }}>
+                  <button
+                    onClick={() => setExpandedMeet(isOpen ? null : meet.meet_id)}
+                    style={{
+                      width: '100%', display: 'flex', alignItems: 'center',
+                      justifyContent: 'space-between', padding: '10px 14px',
+                      background: isOpen ? 'var(--bg-tertiary)' : 'var(--bg-primary)',
+                      border: 'none', cursor: 'pointer', textAlign: 'left',
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{meet.meet_name}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>
+                        {fmtProfileDate(meet.meet_date)}
+                        {hasPR && <span style={{ color: '#f59e0b', marginLeft: 6 }}>★ PR</span>}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                        {meet.results.length} event{meet.results.length !== 1 ? 's' : ''}
+                      </span>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{isOpen ? '▲' : '▼'}</span>
+                    </div>
+                  </button>
+                  {isOpen && (
+                    <div style={{ background: 'var(--bg-secondary)' }}>
+                      {meet.results.map((r, i) => (
+                        <div key={i} style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                          padding: '8px 14px', borderTop: '1px solid var(--border)',
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <PlaceBadge place={r.place} />
+                            <div>
+                              <span style={{ fontSize: 13 }}>{r.event_name}</span>
+                              {r.is_pr ? <span style={{ color: '#f59e0b', marginLeft: 6, fontSize: 11 }}>★ PR</span> : null}
+                            </div>
+                          </div>
+                          <span style={{ fontFamily: 'var(--font-display)', fontSize: 16, fontWeight: 700, color: 'var(--accent)' }}>
+                            {r.mark}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })
+          ) : (
+            /* Contact tab */
+            <div>
+              {[
+                { label: 'Emergency Contact 1', name: athlete.ec1_name, rel: athlete.ec1_rel, ph: athlete.ec1_ph, ph2: athlete.ec1_ph2 },
+                { label: 'Emergency Contact 2', name: athlete.ec2_name, rel: athlete.ec2_rel, ph: athlete.ec2_ph, ph2: null },
+              ].map((ec, i) => (
+                ec.name ? (
+                  <div key={i} style={{
+                    marginBottom: 14, padding: '12px 14px',
+                    border: '1px solid var(--border)', borderRadius: 8,
+                    background: 'var(--bg-primary)',
+                  }}>
+                    <div style={{
+                      fontSize: 10, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase',
+                      color: 'var(--text-muted)', marginBottom: 8,
+                    }}>{ec.label}</div>
+                    <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 2 }}>{ec.name}</div>
+                    {ec.rel && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 }}>{ec.rel}</div>}
+                    {ec.ph && (
+                      <div style={{ fontSize: 13, color: 'var(--accent)', marginBottom: 2 }}>
+                        📞 {ec.ph}
+                      </div>
+                    )}
+                    {ec.ph2 && (
+                      <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                        📞 {ec.ph2}
+                      </div>
+                    )}
+                  </div>
+                ) : null
+              ))}
+
+              {!athlete.ec1_name && !athlete.ec2_name && (
+                <div style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', paddingTop: 20, paddingBottom: 10 }}>
+                  No emergency contacts on file.
+                </div>
+              )}
+
+              {athlete.medical && (
+                <div style={{
+                  marginTop: 6, padding: '12px 14px',
+                  border: '1px solid #7c2d2d', borderRadius: 8,
+                  background: 'rgba(239,68,68,0.07)',
+                }}>
+                  <div style={{
+                    fontSize: 10, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase',
+                    color: '#ef4444', marginBottom: 8,
+                  }}>Medical Notes</div>
+                  <div style={{ fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.55 }}>
+                    {athlete.medical}
+                  </div>
+                </div>
+              )}
+
+              {athlete.notes && (
+                <div style={{
+                  marginTop: 10, padding: '12px 14px',
+                  border: '1px solid var(--border)', borderRadius: 8,
+                }}>
+                  <div style={{
+                    fontSize: 10, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase',
+                    color: 'var(--text-muted)', marginBottom: 8,
+                  }}>Notes</div>
+                  <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55 }}>
+                    {athlete.notes}
+                  </div>
+                </div>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -628,6 +888,7 @@ function AthleteProfilePanel({ athlete, prs, loading, onClose }) {
 
 // ─── Roster Page ──────────────────────────────────────────────
 export default function Roster() {
+  const { homeTeam: HOME_TEAM } = useSettings()
   const [athletes, setAthletes]   = useState([])
   const [loading, setLoading]     = useState(true)
   const [search, setSearch]       = useState('')
@@ -638,9 +899,9 @@ export default function Roster() {
   const [editing, setEditing]     = useState(null)
   const [deleting, setDeleting]   = useState(null)
   const [renaming, setRenaming]   = useState(null) // team name string
-  const [viewing, setViewing]           = useState(null)
-  const [athletePRs, setAthletePRs]     = useState([])
-  const [loadingPRs, setLoadingPRs]     = useState(false)
+  const [viewing, setViewing]               = useState(null)
+  const [athleteProfile, setAthleteProfile] = useState(null)
+  const [loadingProfile, setLoadingProfile] = useState(false)
   const [importAthletes, setImportAthletes] = useState(null)
   const [importing, setImporting]       = useState(false)
   const [clearingRoster, setClearingRoster] = useState(false)
@@ -668,11 +929,11 @@ export default function Roster() {
   }, [])
 
   useEffect(() => {
-    if (!viewing) { setAthletePRs([]); return }
-    setLoadingPRs(true)
-    api.getAthletePRs(viewing.id)
-      .then(data => { setAthletePRs(data); setLoadingPRs(false) })
-      .catch(() => setLoadingPRs(false))
+    if (!viewing) { setAthleteProfile(null); return }
+    setLoadingProfile(true)
+    api.getAthleteProfile(viewing.id)
+      .then(data => { setAthleteProfile(data); setLoadingProfile(false) })
+      .catch(() => setLoadingProfile(false))
   }, [viewing])
 
   const handleAdd = async (form) => {
@@ -752,13 +1013,8 @@ export default function Roster() {
   }
 
   // Distinct teams sorted: home team first, then alphabetical
-  const HOME_TEAM = 'Pegasus Track'
-  const teams = [
-    HOME_TEAM,
-    ...Array.from(new Set(athletes.map(a => a.team || HOME_TEAM)))
-      .filter(t => t !== HOME_TEAM)
-      .sort(),
-  ]
+  const teams =Array.from(new Set(athletes.map(a => a.team || HOME_TEAM)))
+    .sort((a, b) => a === HOME_TEAM ? -1 : b === HOME_TEAM ? 1 : a.localeCompare(b))
   const multipleTeams = teams.length > 1
 
   // ── Filters ─────────────────────────────────────────────────
@@ -1069,8 +1325,8 @@ export default function Roster() {
       {viewing && (
         <AthleteProfilePanel
           athlete={viewing}
-          prs={athletePRs}
-          loading={loadingPRs}
+          profile={athleteProfile}
+          loading={loadingProfile}
           onClose={() => setViewing(null)}
         />
       )}

@@ -61,5 +61,6 @@ export const athleteApi = {
     return Promise.resolve({ success: true })
   },
 
-  getAthletePRs: () => Promise.resolve([]),
+  getAthletePRs:    () => Promise.resolve([]),
+  getAthleteProfile:() => Promise.resolve({ prs: [], history: [], stats: { meets: 0, events: 0, prs: 0 } }),
 }

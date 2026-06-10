@@ -3,6 +3,7 @@ import {
   Trophy, Calendar, MapPin, Users, ChevronRight, X,
   List, Star, Printer,
 } from 'lucide-react'
+import { PrintAwardLabelsModal } from '../components/PrintAwardLabels.jsx'
 
 // ─── Constants ────────────────────────────────────────────
 const SCORE_TABLE = { 1: 8, 2: 6, 3: 5, 4: 4, 5: 3, 6: 2, 7: 1 }
@@ -595,6 +596,7 @@ export default function ResultsPage() {
   const [loadingEvts,  setLoadingEvts]  = useState(false)
   const [printEvent,   setPrintEvent]   = useState(null)  // single event print
   const [printMeet,    setPrintMeet]    = useState(false) // full meet print
+  const [printLabels,  setPrintLabels]  = useState(false) // award labels
 
   // Load meet list
   useEffect(() => {
@@ -649,10 +651,16 @@ export default function ResultsPage() {
           </div>
         </div>
         {selectedMeet && eventsData.length > 0 && (
-          <button className="btn btn-primary" style={{ fontSize: 12 }}
-            onClick={() => setPrintMeet(true)}>
-            <Printer size={13} /> Print Full Meet
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-ghost" style={{ fontSize: 12 }}
+              onClick={() => setPrintLabels(true)}>
+              🏷 Award Labels
+            </button>
+            <button className="btn btn-primary" style={{ fontSize: 12 }}
+              onClick={() => setPrintMeet(true)}>
+              <Printer size={13} /> Print Full Meet
+            </button>
+          </div>
         )}
       </div>
 
@@ -793,6 +801,13 @@ export default function ResultsPage() {
           meet={selectedMeet}
           eventsData={eventsData}
           onClose={() => setPrintMeet(false)}
+        />
+      )}
+      {printLabels && (
+        <PrintAwardLabelsModal
+          meet={selectedMeet}
+          eventsData={eventsData}
+          onClose={() => setPrintLabels(false)}
         />
       )}
     </div>
