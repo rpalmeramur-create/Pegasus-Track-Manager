@@ -1,7 +1,7 @@
 {
   "name": "pegasus-track",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Club management app for Pegasus Track",
   "author": "Pegasus Track",
   "type": "module",
@@ -20,6 +20,7 @@
     "better-sqlite3": "^12.10.0",
     "electron-updater": "^6.3.0",
     "lucide-react": "^0.383.0",
+    "mdb-reader": "^3.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^7.16.0",
@@ -29,6 +30,7 @@
     "@vitejs/plugin-react": "^4.3.1",
     "electron": "^33.4.11",
     "electron-builder": "^25.1.8",
+    "playwright-core": "^1.60.0",
     "vite": "^5.4.0"
   },
   "build": {
@@ -66,7 +68,8 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Pegasus Track",
-      "deleteAppDataOnUninstall": false
+      "deleteAppDataOnUninstall": false,
+      "guid": "e7a2c941-4b38-4d9f-a1fc-8e3d6b720c55"
     },
     "publish": {
       "provider": "github",
