@@ -1958,6 +1958,12 @@ function PrintHeatSheetModal({ meet, meetDetail, onClose }) {
   const [relayLegsByEntry, setRelayLegsByEntry] = useState({})
   const [loading,          setLoading]          = useState(true)
   const [selectedIds,      setSelectedIds]      = useState(null) // null = all
+  // Format options
+  const [nameCase,  setNameCase]  = useState('proper') // 'proper' | 'upper'
+  const [pageBreak, setPageBreak] = useState('event')  // 'event' | 'heat' | 'none'
+  const [showBib,   setShowBib]   = useState(true)
+  const [showSeed,  setShowSeed]  = useState(true)
+  const [showTeam,  setShowTeam]  = useState(true)
   const printRef = useRef(null)
   const autoPrint = getAutoPrint()
 
@@ -1997,19 +2003,233 @@ function PrintHeatSheetModal({ meet, meetDetail, onClose }) {
     return { heats, unseeded }
   }
 
-  const activeEvents = eventsData.filter(ev => (ev.entries ?? []).some(en => !en.scratched))
+  const fmtName = (last, first) =>
+    nameCase === 'upper'
+      ? `${(last || '').toUpperCase()}, ${(first || '').toUpperCase()}`
+      : `${last || ''}, ${first || ''}`
 
-  // If selectedIds is null, treat all active events as selected
+  const activeEvents = eventsData.filter(ev => (ev.entries ?? []).some(en => !en.scratched))
   const effectiveIds = selectedIds ?? new Set(activeEvents.map(ev => ev.id))
   const printEvents  = activeEvents.filter(ev => effectiveIds.has(ev.id))
 
-  const toggleId = (id) => {
-    const next = new Set(effectiveIds)
-    if (next.has(id)) next.delete(id); else next.add(id)
-    setSelectedIds(next)
-  }
+  const toggleId   = (id) => { const n = new Set(effectiveIds); n.has(id) ? n.delete(id) : n.add(id); setSelectedIds(n) }
   const selectAll  = () => setSelectedIds(null)
   const selectNone = () => setSelectedIds(new Set())
+
+  // ── Shared rendering helpers ──────────────────────────────
+  const renderPageHeader = (eventTitle) => (
+    <div className="ps-header">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+          <div className="ps-club-name">PEGASUS TRACK</div>
+          <div className="ps-meet-name">{meet.name}</div>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div className="ps-meet-date">{meetDate}</div>
+          {meet.location && <div className="ps-meet-location">{meet.location}</div>}
+        </div>
+      </div>
+      <div className="ps-divider" />
+      <div className="ps-event-title">{eventTitle}</div>
+    </div>
+  )
+
+  const renderHeatTable = (heat, rows, totalHeats, isField, showWind) => {
+    const heatWord = isField ? 'Flight' : 'Heat'
+    // cols after the fixed lane column
+    const extraCols = (showBib ? 1 : 0) + 1 + (showTeam ? 1 : 0) + (showSeed ? 1 : 0)
+      + (isField ? 7 : showWind ? 3 : 2)
+    return (
+      <div key={heat} style={{ marginBottom: 18 }}>
+        <div className="hs-heat-label">{heatWord} {heat} of {totalHeats}</div>
+        <table className="ps-table">
+          <thead>
+            <tr>
+              <th style={{ width: 28 }}>{isField ? 'Pos' : 'Ln'}</th>
+              {showBib  && <th style={{ width: 30 }}>#</th>}
+              <th className="ps-th-name">Athlete</th>
+              {showTeam && <th style={{ width: 90, textAlign: 'left' }}>Team</th>}
+              {showSeed && <th className="ps-th-seed">Seed</th>}
+              {isField ? (
+                <>
+                  <th className="ps-th-att">1st</th><th className="ps-th-att">2nd</th>
+                  <th className="ps-th-att">3rd</th><th className="ps-th-att">4th</th>
+                  <th className="ps-th-att">5th</th><th className="ps-th-att">6th</th>
+                  <th className="ps-th-best">Best</th>
+                </>
+              ) : (
+                <>
+                  <th style={{ width: 68 }}>Time</th>
+                  {showWind && <th style={{ width: 44 }}>Wind</th>}
+                  <th style={{ width: 28 }}>Pl</th>
+                </>
+              )}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((en, i) => {
+              const legs = relayLegsByEntry[en.id] ?? []
+              return (
+                <React.Fragment key={en.id}>
+                  <tr className={i % 2 === 1 ? 'ps-row-shade' : ''}>
+                    <td className="ps-td-place">{en.lane || '—'}</td>
+                    {showBib  && <td style={{ textAlign: 'center', fontSize: '9pt' }}>{en.athlete_number ?? '—'}</td>}
+                    <td className="ps-td-name">{fmtName(en.last_name, en.first_name)}</td>
+                    {showTeam && <td style={{ padding: '5px 6px', fontSize: '9pt', color: '#555' }}>{en.team || '—'}</td>}
+                    {showSeed && <td className="ps-td-center">{en.seed_mark || '—'}</td>}
+                    {isField
+                      ? [0,1,2,3,4,5,6].map(n => <td key={n} className="hs-write-in" />)
+                      : <><td className="hs-write-in" />{showWind && <td className="hs-write-in" />}<td className="hs-write-in" /></>
+                    }
+                  </tr>
+                  {legs.length > 0 && (
+                    <tr className={i % 2 === 1 ? 'ps-row-shade' : ''}>
+                      <td />
+                      <td colSpan={extraCols}
+                        style={{ padding: '2px 6px 6px', fontSize: '8pt', color: '#666', fontStyle: 'italic' }}>
+                        {legs.map(l => `${l.leg}. ${fmtName(l.last_name, l.first_name)}`).join('  ·  ')}
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+
+  const renderUnseededTable = (unseeded) => (
+    <div style={{ marginTop: 12 }}>
+      <div className="hs-heat-label" style={{ color: '#aaa', borderBottomStyle: 'dashed' }}>Not Yet Seeded</div>
+      <table className="ps-table">
+        <thead>
+          <tr>
+            {showBib  && <th style={{ width: 30 }}>#</th>}
+            <th className="ps-th-name">Athlete</th>
+            {showTeam && <th style={{ width: 90, textAlign: 'left' }}>Team</th>}
+            {showSeed && <th className="ps-th-seed">Seed</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {unseeded.map((en, i) => (
+            <tr key={en.id} className={i % 2 === 1 ? 'ps-row-shade' : ''}>
+              {showBib  && <td style={{ textAlign: 'center', fontSize: '9pt' }}>{en.athlete_number ?? '—'}</td>}
+              <td className="ps-td-name">{fmtName(en.last_name, en.first_name)}</td>
+              {showTeam && <td style={{ padding: '5px 6px', fontSize: '9pt', color: '#555' }}>{en.team || '—'}</td>}
+              {showSeed && <td className="ps-td-center">{en.seed_mark || '—'}</td>}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+
+  const renderFooter = (label) => (
+    <div className="ps-footer">
+      {label}{' · '}Generated {new Date().toLocaleDateString('en-US')}{' · '}Pegasus Track Management
+    </div>
+  )
+
+  // ── Build pages array ─────────────────────────────────────
+  const buildPages = () => {
+    const pages = []
+    const totalEvs = printEvents.length
+
+    printEvents.forEach((ev, evIdx) => {
+      const isField  = ev.category === 'field' || ev.category === 'combined'
+      const showWind = ev.category === 'track'  || ev.category === 'relay'
+      const nonScr   = (ev.entries ?? []).filter(en => !en.scratched)
+      const { heats, unseeded } = groupByHeat(nonScr)
+
+      const eventTitle = [
+        ev.event_name.toUpperCase(),
+        ev.gender === 'M' ? 'BOYS' : ev.gender === 'F' ? 'GIRLS' : 'MIXED',
+        ev.age_group || null,
+        (ev.round || 'FINAL').toUpperCase(),
+      ].filter(Boolean).join(' · ')
+
+      const footerBase = `Event ${evIdx + 1} of ${totalEvs}`
+
+      if (pageBreak === 'heat') {
+        // One print-sheet per heat (and one for unseeded if any)
+        const heatItems = [
+          ...heats.map(h => ({ ...h, type: 'heat' })),
+          ...(unseeded.length ? [{ type: 'unseeded' }] : []),
+        ]
+        if (heatItems.length === 0) {
+          const isLast = evIdx === totalEvs - 1
+          pages.push(
+            <div key={ev.id} className="print-sheet"
+              style={{ pageBreakAfter: isLast ? 'auto' : 'always' }}>
+              {renderPageHeader(eventTitle)}
+              <p style={{ color: '#aaa', fontSize: '9pt', fontStyle: 'italic' }}>No active entries.</p>
+              {renderFooter(footerBase)}
+            </div>
+          )
+        } else {
+          heatItems.forEach(({ type, heat, rows }, pageIdx) => {
+            const isLast = evIdx === totalEvs - 1 && pageIdx === heatItems.length - 1
+            const heatWord = isField ? 'Flight' : 'Heat'
+            const pageLabel = type === 'heat'
+              ? `${heatWord} ${heat} of ${heats.length} · ${footerBase}`
+              : `Unseeded · ${footerBase}`
+            pages.push(
+              <div key={`${ev.id}-${type === 'heat' ? heat : 'u'}`} className="print-sheet"
+                style={{ pageBreakAfter: isLast ? 'auto' : 'always' }}>
+                {renderPageHeader(eventTitle)}
+                {type === 'heat'
+                  ? renderHeatTable(heat, rows, heats.length, isField, showWind)
+                  : renderUnseededTable(unseeded)
+                }
+                {renderFooter(pageLabel)}
+              </div>
+            )
+          })
+        }
+
+      } else if (pageBreak === 'event') {
+        // One print-sheet per event (original default)
+        const isLast = evIdx === totalEvs - 1
+        pages.push(
+          <div key={ev.id} className="print-sheet"
+            style={{ marginBottom: isLast ? 0 : 24, pageBreakAfter: isLast ? 'auto' : 'always' }}>
+            {renderPageHeader(eventTitle)}
+            {heats.map(({ heat, rows }) => renderHeatTable(heat, rows, heats.length, isField, showWind))}
+            {unseeded.length > 0 && renderUnseededTable(unseeded)}
+            {heats.length === 0 && unseeded.length === 0 && (
+              <p style={{ color: '#aaa', fontSize: '9pt', fontStyle: 'italic' }}>No active entries.</p>
+            )}
+            {renderFooter(footerBase)}
+          </div>
+        )
+
+      } else {
+        // No page breaks — continuous flow, event blocks separated by margin
+        pages.push(
+          <div key={ev.id} style={{ marginBottom: evIdx === totalEvs - 1 ? 0 : 24 }}>
+            {renderPageHeader(eventTitle)}
+            {heats.map(({ heat, rows }) => renderHeatTable(heat, rows, heats.length, isField, showWind))}
+            {unseeded.length > 0 && renderUnseededTable(unseeded)}
+            {heats.length === 0 && unseeded.length === 0 && (
+              <p style={{ color: '#aaa', fontSize: '9pt', fontStyle: 'italic' }}>No active entries.</p>
+            )}
+            {renderFooter(footerBase)}
+          </div>
+        )
+      }
+    })
+    return pages
+  }
+
+  const pages = buildPages()
+
+  const selectStyle = {
+    width: '100%', fontSize: 11, padding: '4px 6px', borderRadius: 4,
+    border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text)',
+  }
+  const sectionLabel = { fontSize: 10, fontWeight: 600, textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.06em' }
 
   if (loading) return (
     <div className="print-modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
@@ -2019,13 +2239,16 @@ function PrintHeatSheetModal({ meet, meetDetail, onClose }) {
 
   return (
     <div className="print-modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="print-preview-container" style={{ display: 'flex', flexDirection: 'column', maxWidth: 1100, alignItems: 'stretch', height: '85vh' }}>
+      <div className="print-preview-container"
+        style={{ display: 'flex', flexDirection: 'column', maxWidth: 1100, alignItems: 'stretch', height: '85vh' }}>
+
+        {/* Toolbar */}
         <div className="print-toolbar no-print">
           <span style={{ fontWeight: 600, fontSize: 14 }}>Heat Sheets — Print Preview</span>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             {autoPrint
-              ? <span style={{ fontSize: 12, color: 'var(--text-muted)', display:'flex', alignItems:'center', gap:6 }}>
-                  <RefreshCw size={12} style={{ animation:'spin 0.8s linear infinite' }} />Sending to printer…
+              ? <span style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <RefreshCw size={12} style={{ animation: 'spin 0.8s linear infinite' }} />Sending to printer…
                 </span>
               : <>
                   <button className="btn btn-ghost" onClick={() => savePdfHtml(printRef, meet.name, 'Heat-Sheet')}>⬇ Save PDF</button>
@@ -2039,337 +2262,91 @@ function PrintHeatSheetModal({ meet, meetDetail, onClose }) {
           </div>
         </div>
 
-        {/* Body: event selector sidebar + print preview */}
+        {/* Body */}
         <div className="no-print" style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-          {/* Event selector */}
-          <div style={{
-            width: 220, flexShrink: 0, borderRight: '1px solid var(--border)',
-            display: 'flex', flexDirection: 'column', overflow: 'hidden',
-          }}>
-            <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)', display: 'flex', gap: 6 }}>
-              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 8px', flex: 1 }}
-                onClick={selectAll}>All</button>
-              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 8px', flex: 1 }}
-                onClick={selectNone}>None</button>
+
+          {/* Left sidebar: events + format */}
+          <div style={{ width: 230, flexShrink: 0, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+
+            {/* Events section */}
+            <div style={{ padding: '8px 12px 6px', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ ...sectionLabel, marginBottom: 5 }}>Events</div>
+              <div style={{ display: 'flex', gap: 4 }}>
+                <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 8px', flex: 1 }} onClick={selectAll}>All</button>
+                <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 8px', flex: 1 }} onClick={selectNone}>None</button>
+              </div>
             </div>
-            <div style={{ overflowY: 'auto', flex: 1, padding: '4px 0' }}>
-              {activeEvents.length === 0 ? (
-                <div style={{ padding: '12px', fontSize: 12, color: 'var(--text-muted)' }}>No events with entries.</div>
-              ) : activeEvents.map(ev => {
-                const checked = effectiveIds.has(ev.id)
-                const gStr = ev.gender === 'M' ? 'B' : ev.gender === 'F' ? 'G' : 'X'
-                return (
-                  <label key={ev.id} style={{
-                    display: 'flex', alignItems: 'flex-start', gap: 8, padding: '6px 12px',
-                    cursor: 'pointer', fontSize: 12,
-                    background: checked ? 'rgba(56,189,248,0.08)' : 'transparent',
-                    borderLeft: checked ? '2px solid var(--acc)' : '2px solid transparent',
-                  }}>
-                    <input type="checkbox" checked={checked} onChange={() => toggleId(ev.id)}
-                      style={{ marginTop: 2, accentColor: 'var(--acc)' }} />
-                    <span>
-                      <span style={{ fontWeight: 500 }}>{ev.event_name}</span>
-                      <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>
-                        {gStr}{ev.age_group ? ` ${ev.age_group}` : ''}
-                      </span>
-                    </span>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
+              {activeEvents.length === 0
+                ? <div style={{ padding: '12px', fontSize: 12, color: 'var(--text-muted)' }}>No events with entries.</div>
+                : activeEvents.map(ev => {
+                    const checked = effectiveIds.has(ev.id)
+                    const gStr = ev.gender === 'M' ? 'B' : ev.gender === 'F' ? 'G' : 'X'
+                    return (
+                      <label key={ev.id} style={{
+                        display: 'flex', alignItems: 'flex-start', gap: 8, padding: '6px 12px',
+                        cursor: 'pointer', fontSize: 12,
+                        background: checked ? 'rgba(56,189,248,0.08)' : 'transparent',
+                        borderLeft: checked ? '2px solid var(--acc)' : '2px solid transparent',
+                      }}>
+                        <input type="checkbox" checked={checked} onChange={() => toggleId(ev.id)}
+                          style={{ marginTop: 2, accentColor: 'var(--acc)' }} />
+                        <span>
+                          <span style={{ fontWeight: 500 }}>{ev.event_name}</span>
+                          <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>
+                            {gStr}{ev.age_group ? ` ${ev.age_group}` : ''}
+                          </span>
+                        </span>
+                      </label>
+                    )
+                  })
+              }
+            </div>
+
+            {/* Format options */}
+            <div style={{ borderTop: '1px solid var(--border)', padding: '10px 12px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={sectionLabel}>Format</div>
+
+              <div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 3 }}>Page breaks</div>
+                <select value={pageBreak} onChange={e => setPageBreak(e.target.value)} style={selectStyle}>
+                  <option value="event">One page per event</option>
+                  <option value="heat">One page per heat</option>
+                  <option value="none">No page breaks</option>
+                </select>
+              </div>
+
+              <div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 3 }}>Athlete names</div>
+                <select value={nameCase} onChange={e => setNameCase(e.target.value)} style={selectStyle}>
+                  <option value="proper">Proper (Smith, John)</option>
+                  <option value="upper">ALL CAPS (SMITH, JOHN)</option>
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                {[
+                  [showBib,  setShowBib,  'Show bib #'],
+                  [showSeed, setShowSeed, 'Show seed mark'],
+                  [showTeam, setShowTeam, 'Show team'],
+                ].map(([val, setter, label]) => (
+                  <label key={label} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, cursor: 'pointer' }}>
+                    <input type="checkbox" checked={val} onChange={e => setter(e.target.checked)}
+                      style={{ accentColor: 'var(--acc)' }} />
+                    {label}
                   </label>
-                )
-              })}
+                ))}
+              </div>
             </div>
           </div>
 
-          {/* Scrollable preview area (screen only) */}
-          <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
-            {printEvents.length === 0 ? (
-              <div style={{ color: 'var(--text-muted)', fontSize: 13, padding: 24 }}>
-                Select at least one event to preview.
-              </div>
-            ) : printEvents.map((ev, idx) => {
-              const isField  = ev.category === 'field' || ev.category === 'combined'
-              const showWind = ev.category === 'track'  || ev.category === 'relay'
-              const isLast   = idx === printEvents.length - 1
-              const nonScr   = (ev.entries ?? []).filter(en => !en.scratched)
-              const { heats, unseeded } = groupByHeat(nonScr)
-
-              const eventTitle = [
-                ev.event_name.toUpperCase(),
-                ev.gender === 'M' ? 'BOYS' : ev.gender === 'F' ? 'GIRLS' : 'MIXED',
-                ev.age_group || null,
-                (ev.round || 'FINAL').toUpperCase(),
-              ].filter(Boolean).join(' · ')
-
-              return (
-                <div key={ev.id} className="print-sheet"
-                  style={{ marginBottom: isLast ? 0 : 24, pageBreakAfter: isLast ? 'auto' : 'always' }}>
-                  <div className="ps-header">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <div>
-                        <div className="ps-club-name">PEGASUS TRACK</div>
-                        <div className="ps-meet-name">{meet.name}</div>
-                      </div>
-                      <div style={{ textAlign: 'right' }}>
-                        <div className="ps-meet-date">{meetDate}</div>
-                        {meet.location && <div className="ps-meet-location">{meet.location}</div>}
-                      </div>
-                    </div>
-                    <div className="ps-divider" />
-                    <div className="ps-event-title">{eventTitle}</div>
-                  </div>
-
-                  {heats.map(({ heat, rows }) => (
-                    <div key={heat} style={{ marginBottom: 18 }}>
-                      <div className="hs-heat-label">
-                        {isField ? 'Flight' : 'Heat'} {heat} of {heats.length}
-                      </div>
-                      <table className="ps-table">
-                        <thead>
-                          <tr>
-                            <th style={{ width: 28 }}>{isField ? 'Pos' : 'Ln'}</th>
-                            <th className="ps-th-name">Athlete</th>
-                            <th style={{ width: 90, textAlign: 'left' }}>Team</th>
-                            <th className="ps-th-seed">Seed</th>
-                            {isField ? (
-                              <>
-                                <th className="ps-th-att">1st</th>
-                                <th className="ps-th-att">2nd</th>
-                                <th className="ps-th-att">3rd</th>
-                                <th className="ps-th-att">4th</th>
-                                <th className="ps-th-att">5th</th>
-                                <th className="ps-th-att">6th</th>
-                                <th className="ps-th-best">Best</th>
-                              </>
-                            ) : (
-                              <>
-                                <th style={{ width: 68 }}>Time</th>
-                                {showWind && <th style={{ width: 44 }}>Wind</th>}
-                                <th style={{ width: 28 }}>Pl</th>
-                              </>
-                            )}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {rows.map((en, i) => {
-                            const legs = relayLegsByEntry[en.id] ?? []
-                            const totalCols = isField ? 11 : (showWind ? 6 : 5)
-                            return (
-                              <React.Fragment key={en.id}>
-                                <tr className={i % 2 === 1 ? 'ps-row-shade' : ''}>
-                                  <td className="ps-td-place">{en.lane || '—'}</td>
-                                  <td className="ps-td-name">{en.last_name}, {en.first_name}</td>
-                                  <td style={{ padding: '5px 6px', fontSize: '9pt', color: '#555' }}>
-                                    {en.team || '—'}
-                                  </td>
-                                  <td className="ps-td-center">{en.seed_mark || '—'}</td>
-                                  {isField
-                                    ? [0,1,2,3,4,5,6].map(n => <td key={n} className="hs-write-in" />)
-                                    : <>
-                                        <td className="hs-write-in" />
-                                        {showWind && <td className="hs-write-in" />}
-                                        <td className="hs-write-in" />
-                                      </>
-                                  }
-                                </tr>
-                                {legs.length > 0 && (
-                                  <tr className={i % 2 === 1 ? 'ps-row-shade' : ''}>
-                                    <td />
-                                    <td colSpan={totalCols - 1}
-                                      style={{ padding: '2px 6px 6px', fontSize: '8pt', color: '#666', fontStyle: 'italic' }}>
-                                      {legs.map(l => `${l.leg}. ${l.first_name} ${l.last_name}`).join('  ·  ')}
-                                    </td>
-                                  </tr>
-                                )}
-                              </React.Fragment>
-                            )
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  ))}
-
-                  {unseeded.length > 0 && (
-                    <div style={{ marginTop: heats.length > 0 ? 12 : 0 }}>
-                      <div className="hs-heat-label" style={{ color: '#aaa', borderBottomStyle: 'dashed' }}>
-                        Not Yet Seeded
-                      </div>
-                      <table className="ps-table">
-                        <thead>
-                          <tr>
-                            <th className="ps-th-name">Athlete</th>
-                            <th style={{ width: 90, textAlign: 'left' }}>Team</th>
-                            <th className="ps-th-seed">Seed</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {unseeded.map((en, i) => (
-                            <tr key={en.id} className={i % 2 === 1 ? 'ps-row-shade' : ''}>
-                              <td className="ps-td-name">{en.last_name}, {en.first_name}</td>
-                              <td style={{ padding: '5px 6px', fontSize: '9pt', color: '#555' }}>{en.team || '—'}</td>
-                              <td className="ps-td-center">{en.seed_mark || '—'}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-
-                  {heats.length === 0 && unseeded.length === 0 && (
-                    <p style={{ color: '#aaa', fontSize: '9pt', fontStyle: 'italic' }}>No active entries.</p>
-                  )}
-
-                  <div className="ps-footer">
-                    Event {idx + 1} of {printEvents.length}
-                    {' · '}Generated {new Date().toLocaleDateString('en-US')}
-                    {' · '}Pegasus Track Management
-                  </div>
-                </div>
-              )
-            })}
+          {/* Preview — printRef points here so innerHTML is the print target */}
+          <div ref={printRef} style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
+            {pages.length === 0
+              ? <div style={{ color: 'var(--text-muted)', fontSize: 13, padding: 24 }}>Select at least one event to preview.</div>
+              : pages
+            }
           </div>
-        </div>
-
-        {/* Hidden print-only container — matches selected events */}
-        <div ref={printRef} style={{ display: 'none' }}>
-          {printEvents.map((ev, idx) => {
-            const isField  = ev.category === 'field' || ev.category === 'combined'
-            const showWind = ev.category === 'track'  || ev.category === 'relay'
-            const isLast   = idx === printEvents.length - 1
-            const nonScr   = (ev.entries ?? []).filter(en => !en.scratched)
-            const { heats, unseeded } = groupByHeat(nonScr)
-
-            const eventTitle = [
-              ev.event_name.toUpperCase(),
-              ev.gender === 'M' ? 'BOYS' : ev.gender === 'F' ? 'GIRLS' : 'MIXED',
-              ev.age_group || null,
-              (ev.round || 'FINAL').toUpperCase(),
-            ].filter(Boolean).join(' · ')
-
-            return (
-              <div key={ev.id} className="print-sheet"
-                style={{ marginBottom: isLast ? 0 : 24, pageBreakAfter: isLast ? 'auto' : 'always' }}>
-                <div className="ps-header">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <div>
-                      <div className="ps-club-name">PEGASUS TRACK</div>
-                      <div className="ps-meet-name">{meet.name}</div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div className="ps-meet-date">{meetDate}</div>
-                      {meet.location && <div className="ps-meet-location">{meet.location}</div>}
-                    </div>
-                  </div>
-                  <div className="ps-divider" />
-                  <div className="ps-event-title">{eventTitle}</div>
-                </div>
-
-                {heats.map(({ heat, rows }) => (
-                  <div key={heat} style={{ marginBottom: 18 }}>
-                    <div className="hs-heat-label">
-                      {isField ? 'Flight' : 'Heat'} {heat} of {heats.length}
-                    </div>
-                    <table className="ps-table">
-                      <thead>
-                        <tr>
-                          <th style={{ width: 28 }}>{isField ? 'Pos' : 'Ln'}</th>
-                          <th className="ps-th-name">Athlete</th>
-                          <th style={{ width: 90, textAlign: 'left' }}>Team</th>
-                          <th className="ps-th-seed">Seed</th>
-                          {isField ? (
-                            <>
-                              <th className="ps-th-att">1st</th>
-                              <th className="ps-th-att">2nd</th>
-                              <th className="ps-th-att">3rd</th>
-                              <th className="ps-th-att">4th</th>
-                              <th className="ps-th-att">5th</th>
-                              <th className="ps-th-att">6th</th>
-                              <th className="ps-th-best">Best</th>
-                            </>
-                          ) : (
-                            <>
-                              <th style={{ width: 68 }}>Time</th>
-                              {showWind && <th style={{ width: 44 }}>Wind</th>}
-                              <th style={{ width: 28 }}>Pl</th>
-                            </>
-                          )}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {rows.map((en, i) => {
-                          const legs = relayLegsByEntry[en.id] ?? []
-                          const totalCols = isField ? 11 : (showWind ? 6 : 5)
-                          return (
-                            <React.Fragment key={en.id}>
-                              <tr className={i % 2 === 1 ? 'ps-row-shade' : ''}>
-                                <td className="ps-td-place">{en.lane || '—'}</td>
-                                <td className="ps-td-name">{en.last_name}, {en.first_name}</td>
-                                <td style={{ padding: '5px 6px', fontSize: '9pt', color: '#555' }}>
-                                  {en.team || '—'}
-                                </td>
-                                <td className="ps-td-center">{en.seed_mark || '—'}</td>
-                                {isField
-                                  ? [0,1,2,3,4,5,6].map(n => <td key={n} className="hs-write-in" />)
-                                  : <>
-                                      <td className="hs-write-in" />
-                                      {showWind && <td className="hs-write-in" />}
-                                      <td className="hs-write-in" />
-                                    </>
-                                }
-                              </tr>
-                              {legs.length > 0 && (
-                                <tr className={i % 2 === 1 ? 'ps-row-shade' : ''}>
-                                  <td />
-                                  <td colSpan={totalCols - 1}
-                                    style={{ padding: '2px 6px 6px', fontSize: '8pt', color: '#666', fontStyle: 'italic' }}>
-                                    {legs.map(l => `${l.leg}. ${l.first_name} ${l.last_name}`).join('  ·  ')}
-                                  </td>
-                                </tr>
-                              )}
-                            </React.Fragment>
-                          )
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                ))}
-
-                {unseeded.length > 0 && (
-                  <div style={{ marginTop: heats.length > 0 ? 12 : 0 }}>
-                    <div className="hs-heat-label" style={{ color: '#aaa', borderBottomStyle: 'dashed' }}>
-                      Not Yet Seeded
-                    </div>
-                    <table className="ps-table">
-                      <thead>
-                        <tr>
-                          <th className="ps-th-name">Athlete</th>
-                          <th style={{ width: 90, textAlign: 'left' }}>Team</th>
-                          <th className="ps-th-seed">Seed</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {unseeded.map((en, i) => (
-                          <tr key={en.id} className={i % 2 === 1 ? 'ps-row-shade' : ''}>
-                            <td className="ps-td-name">{en.last_name}, {en.first_name}</td>
-                            <td style={{ padding: '5px 6px', fontSize: '9pt', color: '#555' }}>{en.team || '—'}</td>
-                            <td className="ps-td-center">{en.seed_mark || '—'}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-
-                {heats.length === 0 && unseeded.length === 0 && (
-                  <p style={{ color: '#aaa', fontSize: '9pt', fontStyle: 'italic' }}>No active entries.</p>
-                )}
-
-                <div className="ps-footer">
-                  Event {idx + 1} of {printEvents.length}
-                  {' · '}Generated {new Date().toLocaleDateString('en-US')}
-                  {' · '}Pegasus Track Management
-                </div>
-              </div>
-            )
-          })}
         </div>
       </div>
     </div>
