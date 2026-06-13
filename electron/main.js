@@ -986,7 +986,7 @@ function registerMeetHandlers() {
     return { success: true }
   })
 
-  ipcMain.handle('meets:seedEvent', (_, meetEventId) => {
+  ipcMain.handle('meets:seedEvent', (_, meetEventId, heatSize) => {
     const ev = db.prepare(`
       SELECT me.*, e.category FROM meet_events me
       JOIN tf_events e ON me.tf_event_id = e.id WHERE me.id = ?
@@ -1003,7 +1003,7 @@ function registerMeetHandlers() {
 
     const isField = ev.category === 'field' || ev.category === 'combined'
     const LANE_ORDER = [4, 5, 3, 6, 2, 7, 1, 8]
-    const HEAT_SIZE = 8
+    const HEAT_SIZE = isField ? 8 : (Math.max(2, Math.min(10, Number(heatSize) || 8)))
 
     function parseSeed(str) {
       if (!str) return isField ? -Infinity : Infinity

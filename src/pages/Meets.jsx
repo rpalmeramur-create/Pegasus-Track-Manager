@@ -957,6 +957,7 @@ function WorksheetTab({ meet, meetDetail }) {
   const [seeding,       setSeeding]       = useState(false)
   const [ranking,       setRanking]       = useState(false)
   const [actionMsg,     setActionMsg]     = useState('')
+  const [heatSize,      setHeatSize]      = useState(8)
   const [showPrint,         setShowPrint]         = useState(false)
   const [showAwardLabels,   setShowAwardLabels]   = useState(false)
   const [relayLegs,         setRelayLegs]         = useState({})   // entryId → [{leg,athlete_id,first_name,last_name}]
@@ -1046,7 +1047,7 @@ function WorksheetTab({ meet, meetDetail }) {
     setSeeding(true)
     // Flush pending seed edits first
     await Promise.all(Object.keys(results).map(id => saveSeed(Number(id))))
-    await api.seedEvent(selectedEvent.id)
+    await api.seedEvent(selectedEvent.id, heatSize)
     const d = await api.getMeetEventEntries(selectedEvent.id)
     setEventDetail(d)
     setSeeding(false)
@@ -1136,6 +1137,16 @@ function WorksheetTab({ meet, meetDetail }) {
                   {' · '}{isField ? 'Field — highest mark wins' : 'Track — lowest time wins'}
                 </div>
               </div>
+              {!isField && (
+                <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--text-muted)' }}>
+                  Per heat:
+                  <input type="number" min={2} max={10} value={heatSize}
+                    onChange={e => setHeatSize(Math.max(2, Math.min(10, Number(e.target.value) || 8)))}
+                    style={{ width: 42, padding: '3px 5px', fontSize: 11, borderRadius: 4,
+                      border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text)',
+                      textAlign: 'center' }} />
+                </label>
+              )}
               <button className="btn btn-ghost" style={{ fontSize: 11, padding: '5px 10px' }}
                 onClick={handleAutoSeed} disabled={seeding || ranking}>
                 <Shuffle size={12} /> {seeding ? 'Seeding…' : 'Auto-Seed'}
@@ -1946,6 +1957,7 @@ function PrintHeatSheetModal({ meet, meetDetail, onClose }) {
   const [eventsData,       setEventsData]       = useState([])
   const [relayLegsByEntry, setRelayLegsByEntry] = useState({})
   const [loading,          setLoading]          = useState(true)
+  const [selectedIds,      setSelectedIds]      = useState(null) // null = all
   const printRef = useRef(null)
   const autoPrint = getAutoPrint()
 
@@ -1987,6 +1999,18 @@ function PrintHeatSheetModal({ meet, meetDetail, onClose }) {
 
   const activeEvents = eventsData.filter(ev => (ev.entries ?? []).some(en => !en.scratched))
 
+  // If selectedIds is null, treat all active events as selected
+  const effectiveIds = selectedIds ?? new Set(activeEvents.map(ev => ev.id))
+  const printEvents  = activeEvents.filter(ev => effectiveIds.has(ev.id))
+
+  const toggleId = (id) => {
+    const next = new Set(effectiveIds)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    setSelectedIds(next)
+  }
+  const selectAll  = () => setSelectedIds(null)
+  const selectNone = () => setSelectedIds(new Set())
+
   if (loading) return (
     <div className="print-modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="loading-container"><div className="loading-spinner" /></div>
@@ -1995,7 +2019,7 @@ function PrintHeatSheetModal({ meet, meetDetail, onClose }) {
 
   return (
     <div className="print-modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="print-preview-container">
+      <div className="print-preview-container" style={{ display: 'flex', flexDirection: 'column', maxWidth: 1100, alignItems: 'stretch', height: '85vh' }}>
         <div className="print-toolbar no-print">
           <span style={{ fontWeight: 600, fontSize: 14 }}>Heat Sheets — Print Preview</span>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -2005,28 +2029,211 @@ function PrintHeatSheetModal({ meet, meetDetail, onClose }) {
                 </span>
               : <>
                   <button className="btn btn-ghost" onClick={() => savePdfHtml(printRef, meet.name, 'Heat-Sheet')}>⬇ Save PDF</button>
-                  <button className="btn btn-primary" onClick={() => printSheetHtml(printRef)}>🖨 Print</button>
+                  <button className="btn btn-primary" onClick={() => printSheetHtml(printRef)}
+                    disabled={printEvents.length === 0}>
+                    🖨 Print ({printEvents.length})
+                  </button>
                 </>
             }
             <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={15} /></button>
           </div>
         </div>
 
-        <div ref={printRef}>
-        {activeEvents.length === 0 ? (
-          <div className="print-sheet">
-            <div className="ps-club-name">PEGASUS TRACK</div>
-            <div className="ps-meet-name">{meet.name}</div>
-            <div className="ps-divider" />
-            <p style={{ textAlign: 'center', color: '#888', padding: '40px 0' }}>
-              No entries yet. Add athletes to events first.
-            </p>
+        {/* Body: event selector sidebar + print preview */}
+        <div className="no-print" style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+          {/* Event selector */}
+          <div style={{
+            width: 220, flexShrink: 0, borderRight: '1px solid var(--border)',
+            display: 'flex', flexDirection: 'column', overflow: 'hidden',
+          }}>
+            <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)', display: 'flex', gap: 6 }}>
+              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 8px', flex: 1 }}
+                onClick={selectAll}>All</button>
+              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 8px', flex: 1 }}
+                onClick={selectNone}>None</button>
+            </div>
+            <div style={{ overflowY: 'auto', flex: 1, padding: '4px 0' }}>
+              {activeEvents.length === 0 ? (
+                <div style={{ padding: '12px', fontSize: 12, color: 'var(--text-muted)' }}>No events with entries.</div>
+              ) : activeEvents.map(ev => {
+                const checked = effectiveIds.has(ev.id)
+                const gStr = ev.gender === 'M' ? 'B' : ev.gender === 'F' ? 'G' : 'X'
+                return (
+                  <label key={ev.id} style={{
+                    display: 'flex', alignItems: 'flex-start', gap: 8, padding: '6px 12px',
+                    cursor: 'pointer', fontSize: 12,
+                    background: checked ? 'rgba(56,189,248,0.08)' : 'transparent',
+                    borderLeft: checked ? '2px solid var(--acc)' : '2px solid transparent',
+                  }}>
+                    <input type="checkbox" checked={checked} onChange={() => toggleId(ev.id)}
+                      style={{ marginTop: 2, accentColor: 'var(--acc)' }} />
+                    <span>
+                      <span style={{ fontWeight: 500 }}>{ev.event_name}</span>
+                      <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>
+                        {gStr}{ev.age_group ? ` ${ev.age_group}` : ''}
+                      </span>
+                    </span>
+                  </label>
+                )
+              })}
+            </div>
           </div>
-        ) : (
-          activeEvents.map((ev, idx) => {
+
+          {/* Scrollable preview area (screen only) */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
+            {printEvents.length === 0 ? (
+              <div style={{ color: 'var(--text-muted)', fontSize: 13, padding: 24 }}>
+                Select at least one event to preview.
+              </div>
+            ) : printEvents.map((ev, idx) => {
+              const isField  = ev.category === 'field' || ev.category === 'combined'
+              const showWind = ev.category === 'track'  || ev.category === 'relay'
+              const isLast   = idx === printEvents.length - 1
+              const nonScr   = (ev.entries ?? []).filter(en => !en.scratched)
+              const { heats, unseeded } = groupByHeat(nonScr)
+
+              const eventTitle = [
+                ev.event_name.toUpperCase(),
+                ev.gender === 'M' ? 'BOYS' : ev.gender === 'F' ? 'GIRLS' : 'MIXED',
+                ev.age_group || null,
+                (ev.round || 'FINAL').toUpperCase(),
+              ].filter(Boolean).join(' · ')
+
+              return (
+                <div key={ev.id} className="print-sheet"
+                  style={{ marginBottom: isLast ? 0 : 24, pageBreakAfter: isLast ? 'auto' : 'always' }}>
+                  <div className="ps-header">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div>
+                        <div className="ps-club-name">PEGASUS TRACK</div>
+                        <div className="ps-meet-name">{meet.name}</div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div className="ps-meet-date">{meetDate}</div>
+                        {meet.location && <div className="ps-meet-location">{meet.location}</div>}
+                      </div>
+                    </div>
+                    <div className="ps-divider" />
+                    <div className="ps-event-title">{eventTitle}</div>
+                  </div>
+
+                  {heats.map(({ heat, rows }) => (
+                    <div key={heat} style={{ marginBottom: 18 }}>
+                      <div className="hs-heat-label">
+                        {isField ? 'Flight' : 'Heat'} {heat} of {heats.length}
+                      </div>
+                      <table className="ps-table">
+                        <thead>
+                          <tr>
+                            <th style={{ width: 28 }}>{isField ? 'Pos' : 'Ln'}</th>
+                            <th className="ps-th-name">Athlete</th>
+                            <th style={{ width: 90, textAlign: 'left' }}>Team</th>
+                            <th className="ps-th-seed">Seed</th>
+                            {isField ? (
+                              <>
+                                <th className="ps-th-att">1st</th>
+                                <th className="ps-th-att">2nd</th>
+                                <th className="ps-th-att">3rd</th>
+                                <th className="ps-th-att">4th</th>
+                                <th className="ps-th-att">5th</th>
+                                <th className="ps-th-att">6th</th>
+                                <th className="ps-th-best">Best</th>
+                              </>
+                            ) : (
+                              <>
+                                <th style={{ width: 68 }}>Time</th>
+                                {showWind && <th style={{ width: 44 }}>Wind</th>}
+                                <th style={{ width: 28 }}>Pl</th>
+                              </>
+                            )}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rows.map((en, i) => {
+                            const legs = relayLegsByEntry[en.id] ?? []
+                            const totalCols = isField ? 11 : (showWind ? 6 : 5)
+                            return (
+                              <React.Fragment key={en.id}>
+                                <tr className={i % 2 === 1 ? 'ps-row-shade' : ''}>
+                                  <td className="ps-td-place">{en.lane || '—'}</td>
+                                  <td className="ps-td-name">{en.last_name}, {en.first_name}</td>
+                                  <td style={{ padding: '5px 6px', fontSize: '9pt', color: '#555' }}>
+                                    {en.team || '—'}
+                                  </td>
+                                  <td className="ps-td-center">{en.seed_mark || '—'}</td>
+                                  {isField
+                                    ? [0,1,2,3,4,5,6].map(n => <td key={n} className="hs-write-in" />)
+                                    : <>
+                                        <td className="hs-write-in" />
+                                        {showWind && <td className="hs-write-in" />}
+                                        <td className="hs-write-in" />
+                                      </>
+                                  }
+                                </tr>
+                                {legs.length > 0 && (
+                                  <tr className={i % 2 === 1 ? 'ps-row-shade' : ''}>
+                                    <td />
+                                    <td colSpan={totalCols - 1}
+                                      style={{ padding: '2px 6px 6px', fontSize: '8pt', color: '#666', fontStyle: 'italic' }}>
+                                      {legs.map(l => `${l.leg}. ${l.first_name} ${l.last_name}`).join('  ·  ')}
+                                    </td>
+                                  </tr>
+                                )}
+                              </React.Fragment>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ))}
+
+                  {unseeded.length > 0 && (
+                    <div style={{ marginTop: heats.length > 0 ? 12 : 0 }}>
+                      <div className="hs-heat-label" style={{ color: '#aaa', borderBottomStyle: 'dashed' }}>
+                        Not Yet Seeded
+                      </div>
+                      <table className="ps-table">
+                        <thead>
+                          <tr>
+                            <th className="ps-th-name">Athlete</th>
+                            <th style={{ width: 90, textAlign: 'left' }}>Team</th>
+                            <th className="ps-th-seed">Seed</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {unseeded.map((en, i) => (
+                            <tr key={en.id} className={i % 2 === 1 ? 'ps-row-shade' : ''}>
+                              <td className="ps-td-name">{en.last_name}, {en.first_name}</td>
+                              <td style={{ padding: '5px 6px', fontSize: '9pt', color: '#555' }}>{en.team || '—'}</td>
+                              <td className="ps-td-center">{en.seed_mark || '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {heats.length === 0 && unseeded.length === 0 && (
+                    <p style={{ color: '#aaa', fontSize: '9pt', fontStyle: 'italic' }}>No active entries.</p>
+                  )}
+
+                  <div className="ps-footer">
+                    Event {idx + 1} of {printEvents.length}
+                    {' · '}Generated {new Date().toLocaleDateString('en-US')}
+                    {' · '}Pegasus Track Management
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* Hidden print-only container — matches selected events */}
+        <div ref={printRef} style={{ display: 'none' }}>
+          {printEvents.map((ev, idx) => {
             const isField  = ev.category === 'field' || ev.category === 'combined'
             const showWind = ev.category === 'track'  || ev.category === 'relay'
-            const isLast   = idx === activeEvents.length - 1
+            const isLast   = idx === printEvents.length - 1
             const nonScr   = (ev.entries ?? []).filter(en => !en.scratched)
             const { heats, unseeded } = groupByHeat(nonScr)
 
@@ -2156,14 +2363,13 @@ function PrintHeatSheetModal({ meet, meetDetail, onClose }) {
                 )}
 
                 <div className="ps-footer">
-                  Event {idx + 1} of {activeEvents.length}
+                  Event {idx + 1} of {printEvents.length}
                   {' · '}Generated {new Date().toLocaleDateString('en-US')}
                   {' · '}Pegasus Track Management
                 </div>
               </div>
             )
-          })
-        )}
+          })}
         </div>
       </div>
     </div>
@@ -3851,6 +4057,32 @@ export default function Meets() {
     }
   }
 
+  const handleImportHytek = async () => {
+    setImporting(true)
+    try {
+      const result = await api.importHytek()
+      if (!result) return
+      if (result.error) { alert(`Hy-Tek import failed:\n${result.error}`); return }
+      const { meetName, eventsAdded, entriesAdded, athFound, athCreated,
+              skippedNoEvent, skippedNoAthlete, skippedDupe, meetId } = result
+      const skipLine = (skippedNoEvent || skippedNoAthlete || skippedDupe)
+        ? `\n\nSkipped: no event: ${skippedNoEvent ?? 0}  no athlete: ${skippedNoAthlete ?? 0}  duplicate: ${skippedDupe ?? 0}`
+        : ''
+      alert(
+        `Hy-Tek import complete!\n\nMeet: ${meetName}\n` +
+        `Events: ${eventsAdded}   Results: ${entriesAdded}\n` +
+        `Athletes matched: ${athFound}   created: ${athCreated}` +
+        skipLine
+      )
+      const allMeets = await api.getMeets()
+      setMeets(allMeets)
+      const newMeet = allMeets.find(m => m.id === meetId)
+      if (newMeet) setSelectedMeet(newMeet)
+    } finally {
+      setImporting(false)
+    }
+  }
+
   useEffect(() => { load() }, [load])
 
   if (selectedMeet) {
@@ -3882,8 +4114,11 @@ export default function Meets() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-ghost" onClick={handleImportTCL} disabled={importing}>
-            {importing ? 'Importing…' : 'Import Hy-Tek'}
+          <button className="btn btn-ghost" onClick={handleImportHytek} disabled={importing} title="Import a completed meet from a Hy-Tek .mdb database file">
+            {importing ? 'Importing…' : 'Import .mdb'}
+          </button>
+          <button className="btn btn-ghost" onClick={handleImportTCL} disabled={importing} title="Import from a Hy-Tek TCL results file">
+            {importing ? 'Importing…' : 'Import TCL'}
           </button>
           <button className="btn btn-primary" onClick={() => setShowAdd(true)}>
             <Plus size={14} /> New Meet

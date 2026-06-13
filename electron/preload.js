@@ -54,7 +54,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveResult:            (entryId, data)  => ipcRenderer.invoke('results:save', entryId, data),
   autoRank:              (meetEventId)    => ipcRenderer.invoke('results:autoRank',      meetEventId),
   advanceAthletes:       (data)           => ipcRenderer.invoke('meetEvents:advance',     data),
-  seedEvent:             (meetEventId)    => ipcRenderer.invoke('meets:seedEvent', meetEventId),
+  seedEvent:             (meetEventId, heatSize) => ipcRenderer.invoke('meets:seedEvent', meetEventId, heatSize),
 
   // Parent Portal
   getMeetResults: () => ipcRenderer.invoke('portal:getMeetResults'),
@@ -108,6 +108,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Hy-tek TCL full meet import
   importTCLMeet: (filePath) => ipcRenderer.invoke('import:tclMeet', filePath),
+
+  // Hy-Tek MDB (Access database) meet import
+  importHytek: (filePath) => ipcRenderer.invoke('import:hytek', filePath),
 
   // Auth
   authGetSession:    ()       => ipcRenderer.invoke('auth:getSession'),
