@@ -1405,7 +1405,13 @@ function parseHytekMDB(filePath) {
     const entryRows = mdb.getTable('Entry').getData()
 
     const meetRow = meetRows[0] || {}
-    const meetName = (meetRow.Meet_name1 || 'Imported Meet').trim()
+    // Meet_name1 often stores the host club name, not the event name.
+    // Use the filename (without extension) when the name looks like a club
+    // (doesn't contain meet-specific keywords).
+    const rawName1 = (meetRow.Meet_name1 || '').trim()
+    const fileBaseName = require('path').basename(filePath, require('path').extname(filePath))
+    const looksLikeMeetName = /\b(meet|invitational|championship|classic|memorial|cup|relay|open|dual|games|festival)\b/i.test(rawName1)
+    const meetName = looksLikeMeetName ? rawName1 : (fileBaseName || rawName1 || 'Imported Meet')
     const meetDate = meetRow.Meet_start
       ? new Date(meetRow.Meet_start).toISOString().slice(0, 10)
       : new Date().toISOString().slice(0, 10)
