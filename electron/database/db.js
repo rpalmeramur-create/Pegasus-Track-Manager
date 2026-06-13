@@ -278,6 +278,29 @@ module.exports = function initSchema(db) {
     )
   `)
 
+  // ─── Users / Auth ────────────────────────────────────────────
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      username      TEXT    NOT NULL UNIQUE COLLATE NOCASE,
+      password_hash TEXT    NOT NULL,
+      role          TEXT    NOT NULL DEFAULT 'parent' CHECK(role IN ('admin','parent')),
+      display_name  TEXT,
+      active        INTEGER NOT NULL DEFAULT 1,
+      last_login    TEXT,
+      created_at    TEXT    DEFAULT (datetime('now'))
+    )
+  `)
+  // Seed default admin if no users exist
+  const userCount = db.prepare('SELECT COUNT(*) as n FROM users').get()
+  if (userCount.n === 0) {
+    const crypto = require('crypto')
+    const salt = crypto.randomBytes(16).toString('hex')
+    const hash = crypto.scryptSync('coach', salt, 64).toString('hex')
+    db.prepare(`INSERT INTO users (username, password_hash, role, display_name)
+                VALUES ('admin', ?, 'admin', 'Head Coach')`).run(`${salt}:${hash}`)
+  }
+
   // ─── Attendance ──────────────────────────────────────────────
   db.exec(`
     CREATE TABLE IF NOT EXISTS attendance (

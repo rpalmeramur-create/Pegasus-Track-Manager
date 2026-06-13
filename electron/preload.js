@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Teams
   getTeamProfiles: ()     => ipcRenderer.invoke('teams:getProfiles'),
   saveTeamProfile: (data) => ipcRenderer.invoke('teams:saveProfile', data),
+  mergeTeam:  (fromTeam, toTeam)       => ipcRenderer.invoke('teams:merge',  { fromTeam, toTeam }),
+  deleteTeam: (teamName, reassignTo)   => ipcRenderer.invoke('teams:delete', { teamName, reassignTo }),
 
   // Dashboard
   getDashboardStats: () => ipcRenderer.invoke('dashboard:getStats'),
@@ -53,6 +55,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   autoRank:              (meetEventId)    => ipcRenderer.invoke('results:autoRank',      meetEventId),
   advanceAthletes:       (data)           => ipcRenderer.invoke('meetEvents:advance',     data),
   seedEvent:             (meetEventId)    => ipcRenderer.invoke('meets:seedEvent', meetEventId),
+
+  // Parent Portal
+  getMeetResults: () => ipcRenderer.invoke('portal:getMeetResults'),
 
   // Schedule
   getUpcomingSchedule: ()     => ipcRenderer.invoke('schedule:getUpcoming'),
@@ -103,6 +108,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Hy-tek TCL full meet import
   importTCLMeet: (filePath) => ipcRenderer.invoke('import:tclMeet', filePath),
+
+  // Auth
+  authGetSession:    ()       => ipcRenderer.invoke('auth:getSession'),
+  authLogin:         (data)   => ipcRenderer.invoke('auth:login',         data),
+  authLogout:        ()       => ipcRenderer.invoke('auth:logout'),
+  authListUsers:     ()       => ipcRenderer.invoke('auth:listUsers'),
+  authCreateUser:    (data)   => ipcRenderer.invoke('auth:createUser',    data),
+  authUpdatePassword:(data)   => ipcRenderer.invoke('auth:updatePassword', data),
+  authUpdateUser:    (data)   => ipcRenderer.invoke('auth:updateUser',    data),
+  authDeleteUser:    (id)     => ipcRenderer.invoke('auth:deleteUser',    id),
 
   // Updates
   checkForUpdates: () => ipcRenderer.invoke('updates:check'),

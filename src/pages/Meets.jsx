@@ -2192,29 +2192,27 @@ function LabelContent({ lbl, variant, includeMark, meetDateStr }) {
   if (variant === 'wide-sm') {
     return (
       <div className="al-label al-label-wide-sm">
-        {/* Speed-wings watermark (Hamilton-inspired) — top-center, behind content */}
-        <svg className="al-wsm-watermark" viewBox="0 0 200 80" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          {/* Central diamond */}
-          <path d="M100 28 L112 40 L100 52 L88 40 Z"/>
-          {/* Left upper blade — sweeps up and back */}
-          <path d="M91 37 Q68 22 38 14 Q20 9 4 12 Q24 20 52 28 Q74 33 91 37 Z"/>
-          {/* Left lower blade — sweeps down and back */}
-          <path d="M91 43 Q66 50 36 57 Q18 61 2 58 Q22 52 50 46 Q72 43 91 43 Z"/>
-          {/* Right upper blade — mirror */}
-          <path d="M109 37 Q132 22 162 14 Q180 9 196 12 Q176 20 148 28 Q126 33 109 37 Z"/>
-          {/* Right lower blade — mirror */}
-          <path d="M109 43 Q134 50 164 57 Q182 61 198 58 Q178 52 150 46 Q128 43 109 43 Z"/>
-        </svg>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
-          <span className="al-wsm-place" style={{ color: placeColor }}>{ordinal} PLACE</span>
-          <span className="al-wsm-name">{lastName}, {firstName}</span>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
-          <span className="al-wsm-event">{eventLine}</span>
-          <span style={{ display: 'flex', gap: 5, alignItems: 'baseline', flexShrink: 0 }}>
+        <div className="al-wsm-left">
+          <div className="al-wsm-row">
+            <span className="al-wsm-place" style={{ color: placeColor }}>{ordinal} PLACE</span>
+            <span className="al-wsm-name">{lastName}, {firstName}</span>
+          </div>
+          <div className="al-wsm-row">
+            <span className="al-wsm-event">{eventLine}</span>
             {includeMark && mark && <span className="al-wsm-mark">{mark}</span>}
+          </div>
+          <div className="al-wsm-row">
             <span className="al-wsm-meta">{meetName} · {meetDateStr}</span>
-          </span>
+          </div>
+        </div>
+        <div className="al-wsm-right">
+          <svg className="al-wsm-watermark" viewBox="0 0 200 80" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <path d="M100 28 L112 40 L100 52 L88 40 Z"/>
+            <path d="M91 37 Q68 22 38 14 Q20 9 4 12 Q24 20 52 28 Q74 33 91 37 Z"/>
+            <path d="M91 43 Q66 50 36 57 Q18 61 2 58 Q22 52 50 46 Q72 43 91 43 Z"/>
+            <path d="M109 37 Q132 22 162 14 Q180 9 196 12 Q176 20 148 28 Q126 33 109 37 Z"/>
+            <path d="M109 43 Q134 50 164 57 Q182 61 198 58 Q178 52 150 46 Q128 43 109 43 Z"/>
+          </svg>
         </div>
       </div>
     )
@@ -2243,18 +2241,29 @@ function LabelContent({ lbl, variant, includeMark, meetDateStr }) {
     )
   }
 
-  // Default: large landscape (lg) — used for avery5163 and thermal4x2
+  // Default: large landscape (lg) — all text left, watermark right
   return (
     <div className="al-label al-label-lg">
-      <div className="al-row-top">
-        <span className="al-club">Pegasus Track</span>
-        <span className="al-meet">{meetName}<br />{meetDateStr}</span>
+      <div className="al-lg-left">
+        <div>
+          <div className="al-club">Pegasus Track</div>
+          <div className="al-meet-sub">{meetName} · {meetDateStr}</div>
+        </div>
+        <div className="al-rule" />
+        <div className="al-place" style={{ color: placeColor }}>{ordinal} PLACE</div>
+        <div className="al-name">{lastName}, {firstName}</div>
+        <div className="al-event">{eventLine}</div>
+        {includeMark && mark && <div className="al-mark-standalone">{mark}</div>}
       </div>
-      <div className="al-rule" />
-      <div className="al-place" style={{ color: placeColor }}>{ordinal} PLACE</div>
-      <div className="al-name">{lastName}, {firstName}</div>
-      <div className="al-event">{eventLine}</div>
-      {includeMark && mark && <div className="al-mark-standalone">{mark}</div>}
+      <div className="al-lg-right">
+        <svg className="al-lg-watermark" viewBox="0 0 200 160" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M100 28 L112 40 L100 52 L88 40 Z"/>
+          <path d="M91 37 Q68 22 38 14 Q20 9 4 12 Q24 20 52 28 Q74 33 91 37 Z"/>
+          <path d="M91 43 Q66 50 36 57 Q18 61 2 58 Q22 52 50 46 Q72 43 91 43 Z"/>
+          <path d="M109 37 Q132 22 162 14 Q180 9 196 12 Q176 20 148 28 Q126 33 109 37 Z"/>
+          <path d="M109 43 Q134 50 164 57 Q182 61 198 58 Q178 52 150 46 Q128 43 109 43 Z"/>
+        </svg>
+      </div>
     </div>
   )
 }

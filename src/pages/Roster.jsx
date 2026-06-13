@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react'
-import { Search, UserPlus, Edit2, Trash2, X, Pencil, Upload, MapPin, User, Calendar } from 'lucide-react'
+import { Search, UserPlus, Edit2, Trash2, X, Pencil, Upload, MapPin, User, Calendar, GitMerge } from 'lucide-react'
 import { athleteApi } from '../mockStore.js'
 import { useSettings } from '../SettingsContext.jsx'
 
@@ -276,6 +276,90 @@ function RenameTeamModal({ teamName, count, onConfirm, onClose }) {
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
           <button className="btn btn-primary" onClick={handleConfirm} disabled={saving || !value.trim()}>
             {saving ? 'Renaming…' : 'Rename Team'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Merge Team Modal ─────────────────────────────────────────
+function MergeTeamModal({ teamName, count, otherTeams, onConfirm, onClose }) {
+  const [target, setTarget] = useState(otherTeams[0] ?? '')
+  const [saving, setSaving] = useState(false)
+
+  const handleConfirm = async () => {
+    if (!target) return
+    setSaving(true)
+    await onConfirm(target)
+    setSaving(false)
+  }
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ maxWidth: 420 }}>
+        <div className="modal-header">
+          <div className="modal-title">Merge Team</div>
+          <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={15} /></button>
+        </div>
+        <p style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 16, lineHeight: 1.6 }}>
+          Merge <strong style={{ color: 'var(--text-primary)' }}>{teamName}</strong> ({count} athlete{count !== 1 ? 's' : ''}) into another team.
+          The source team will be removed.
+        </p>
+        <div className="form-group">
+          <label className="form-label">Merge into</label>
+          <select className="input" value={target} onChange={e => setTarget(e.target.value)}>
+            {otherTeams.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" onClick={handleConfirm} disabled={saving || !target}>
+            {saving ? 'Merging…' : 'Merge Team'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Delete Team Modal ────────────────────────────────────────
+function DeleteTeamModal({ teamName, count, otherTeams, defaultReassign, onConfirm, onClose }) {
+  const [reassignTo, setReassignTo] = useState(defaultReassign ?? otherTeams[0] ?? '')
+  const [saving, setSaving] = useState(false)
+
+  const handleConfirm = async () => {
+    setSaving(true)
+    await onConfirm(reassignTo)
+    setSaving(false)
+  }
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ maxWidth: 420 }}>
+        <div className="modal-header">
+          <div className="modal-title">Delete Team</div>
+          <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={15} /></button>
+        </div>
+        <p style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 16, lineHeight: 1.6 }}>
+          Delete <strong style={{ color: 'var(--text-primary)' }}>{teamName}</strong>?
+          {count > 0
+            ? <> Its {count} athlete{count !== 1 ? 's' : ''} will be moved to the team below.</>
+            : <> This team has no athletes and its profile will be removed.</>
+          }
+        </p>
+        {count > 0 && (
+          <div className="form-group">
+            <label className="form-label">Move athletes to</label>
+            <select className="input" value={reassignTo} onChange={e => setReassignTo(e.target.value)}>
+              {otherTeams.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+        )}
+        <div className="modal-footer">
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-danger" onClick={handleConfirm} disabled={saving}>
+            {saving ? 'Deleting…' : 'Delete Team'}
           </button>
         </div>
       </div>
@@ -899,6 +983,8 @@ export default function Roster() {
   const [editing, setEditing]     = useState(null)
   const [deleting, setDeleting]   = useState(null)
   const [renaming, setRenaming]   = useState(null) // team name string
+  const [mergingTeam, setMergingTeam]   = useState(null) // team name string
+  const [deletingTeam, setDeletingTeam] = useState(null) // team name string
   const [viewing, setViewing]               = useState(null)
   const [athleteProfile, setAthleteProfile] = useState(null)
   const [loadingProfile, setLoadingProfile] = useState(false)
@@ -1003,6 +1089,26 @@ export default function Roster() {
       return next
     })
     setRenaming(null)
+  }
+
+  const handleMergeTeam = async (targetTeam) => {
+    await api.mergeTeam(mergingTeam, targetTeam)
+    setAthletes(prev => prev.map(a =>
+      (a.team || HOME_TEAM) === mergingTeam ? { ...a, team: targetTeam } : a
+    ))
+    if (filterTeam === mergingTeam) setTeam('all')
+    setTeamProfiles(prev => { const next = { ...prev }; delete next[mergingTeam]; return next })
+    setMergingTeam(null)
+  }
+
+  const handleDeleteTeam = async (reassignTo) => {
+    await api.deleteTeam(deletingTeam, reassignTo)
+    setAthletes(prev => prev.map(a =>
+      (a.team || HOME_TEAM) === deletingTeam ? { ...a, team: reassignTo } : a
+    ))
+    if (filterTeam === deletingTeam) setTeam('all')
+    setTeamProfiles(prev => { const next = { ...prev }; delete next[deletingTeam]; return next })
+    setDeletingTeam(null)
   }
 
   const handleSaveProfile = async (data) => {
@@ -1123,6 +1229,24 @@ export default function Roster() {
                       <Pencil size={11} />
                     </button>
                   )}
+                  {teams.length > 1 && (
+                    <button
+                      className="btn btn-ghost btn-icon"
+                      style={{ padding: 3, width: 22, height: 22, opacity: 0.55 }}
+                      title={`Merge ${t} into another team`}
+                      onClick={e => { e.stopPropagation(); setMergingTeam(t) }}
+                    >
+                      <GitMerge size={11} />
+                    </button>
+                  )}
+                  <button
+                    className="btn btn-ghost btn-icon"
+                    style={{ padding: 3, width: 22, height: 22, opacity: 0.55, color: 'var(--red)' }}
+                    title={`Delete ${t}`}
+                    onClick={e => { e.stopPropagation(); setDeletingTeam(t) }}
+                  >
+                    <Trash2 size={11} />
+                  </button>
                 </div>
               </div>
               {(profile?.location || profile?.head_coach || profile?.founded) && (
@@ -1300,6 +1424,25 @@ export default function Roster() {
           profile={teamProfiles[editingProfile]}
           onSave={handleSaveProfile}
           onClose={() => setEditingProfile(null)}
+        />
+      )}
+      {mergingTeam && (
+        <MergeTeamModal
+          teamName={mergingTeam}
+          count={countFor(mergingTeam)}
+          otherTeams={teams.filter(t => t !== mergingTeam)}
+          onConfirm={handleMergeTeam}
+          onClose={() => setMergingTeam(null)}
+        />
+      )}
+      {deletingTeam && (
+        <DeleteTeamModal
+          teamName={deletingTeam}
+          count={countFor(deletingTeam)}
+          otherTeams={teams.filter(t => t !== deletingTeam)}
+          defaultReassign={HOME_TEAM !== deletingTeam ? HOME_TEAM : teams.find(t => t !== deletingTeam) ?? ''}
+          onConfirm={handleDeleteTeam}
+          onClose={() => setDeletingTeam(null)}
         />
       )}
 

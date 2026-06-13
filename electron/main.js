@@ -411,6 +411,102 @@ function registerEventHandlers() {
 }
 
 // ═══════════════════════════════════════════════
+// IPC — AUTH
+// ═══════════════════════════════════════════════
+
+function hashPassword(password) {
+  const crypto = require('crypto')
+  const salt = crypto.randomBytes(16).toString('hex')
+  const hash = crypto.scryptSync(password, salt, 64).toString('hex')
+  return `${salt}:${hash}`
+}
+
+function verifyPassword(password, stored) {
+  try {
+    const crypto = require('crypto')
+    const [salt, hash] = stored.split(':')
+    const verify = crypto.scryptSync(password, salt, 64).toString('hex')
+    return verify === hash
+  } catch { return false }
+}
+
+// In-memory session — persists for app lifetime; auto-restored from settings
+let currentSession = null
+
+function registerAuthHandlers() {
+  const { readSettings, writeSettings } = require('./settings')
+
+  // Restore saved session on startup
+  const saved = readSettings().savedSession
+  if (saved?.id) {
+    const u = db.prepare('SELECT id, username, role, display_name FROM users WHERE id=? AND active=1').get(saved.id)
+    if (u) currentSession = u
+  }
+
+  ipcMain.handle('auth:getSession', () => currentSession)
+
+  ipcMain.handle('auth:login', (_, { username, password }) => {
+    const user = db.prepare(
+      'SELECT id, username, password_hash, role, display_name FROM users WHERE username=? AND active=1'
+    ).get(username)
+    if (!user) return { error: 'Invalid username or password' }
+    if (!verifyPassword(password, user.password_hash)) return { error: 'Invalid username or password' }
+    db.prepare("UPDATE users SET last_login=datetime('now') WHERE id=?").run(user.id)
+    const session = { id: user.id, username: user.username, role: user.role, display_name: user.display_name }
+    currentSession = session
+    writeSettings({ savedSession: session })
+    return session
+  })
+
+  ipcMain.handle('auth:logout', () => {
+    currentSession = null
+    const { readSettings: rs, writeSettings: ws } = require('./settings')
+    const s = rs()
+    delete s.savedSession
+    const fs = require('fs')
+    const path = require('path')
+    const { app: _app } = require('electron')
+    fs.writeFileSync(path.join(_app.getPath('userData'), 'settings.json'), JSON.stringify(s, null, 2), 'utf8')
+    return { success: true }
+  })
+
+  ipcMain.handle('auth:listUsers', () => {
+    return db.prepare('SELECT id, username, role, display_name, active, last_login, created_at FROM users ORDER BY role DESC, username').all()
+  })
+
+  ipcMain.handle('auth:createUser', (_, { username, password, role, display_name }) => {
+    if (!username?.trim()) return { error: 'Username is required' }
+    if (!password || password.length < 4) return { error: 'Password must be at least 4 characters' }
+    const exists = db.prepare('SELECT id FROM users WHERE username=?').get(username.trim())
+    if (exists) return { error: 'Username already exists' }
+    const r = db.prepare(
+      'INSERT INTO users (username, password_hash, role, display_name) VALUES (?,?,?,?)'
+    ).run(username.trim(), hashPassword(password), role || 'parent', display_name?.trim() || null)
+    return { id: r.lastInsertRowid }
+  })
+
+  ipcMain.handle('auth:updatePassword', (_, { userId, newPassword }) => {
+    if (!newPassword || newPassword.length < 4) return { error: 'Password must be at least 4 characters' }
+    db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(hashPassword(newPassword), userId)
+    return { success: true }
+  })
+
+  ipcMain.handle('auth:updateUser', (_, { id, display_name, role }) => {
+    db.prepare('UPDATE users SET display_name=?, role=? WHERE id=?').run(display_name || null, role, id)
+    return { success: true }
+  })
+
+  ipcMain.handle('auth:deleteUser', (_, userId) => {
+    // Prevent deleting the last admin
+    const admins = db.prepare("SELECT COUNT(*) as n FROM users WHERE role='admin' AND active=1").get()
+    const target = db.prepare('SELECT role FROM users WHERE id=?').get(userId)
+    if (target?.role === 'admin' && admins.n <= 1) return { error: 'Cannot delete the last admin account' }
+    db.prepare('UPDATE users SET active=0 WHERE id=?').run(userId)
+    return { success: true }
+  })
+}
+
+// ═══════════════════════════════════════════════
 // IPC — SETTINGS
 // ═══════════════════════════════════════════════
 
@@ -940,6 +1036,59 @@ function registerMeetHandlers() {
     }
 
     return { success: true }
+  })
+}
+
+// ═══════════════════════════════════════════════
+// IPC — PARENT PORTAL
+// ═══════════════════════════════════════════════
+
+function registerPortalHandlers() {
+  ipcMain.handle('portal:getMeetResults', () => {
+    const meets = db.prepare(`
+      SELECT id, name, date, location, type
+      FROM meets
+      WHERE status = 'completed'
+      ORDER BY date DESC
+      LIMIT 10
+    `).all()
+
+    for (const meet of meets) {
+      meet.events = db.prepare(`
+        SELECT me.id, me.gender, me.age_group, me.round,
+               e.name AS event_name, e.category, e.measurement_unit, e.sort_order
+        FROM meet_events me
+        JOIN tf_events e ON me.tf_event_id = e.id
+        WHERE me.meet_id = ?
+          AND EXISTS (
+            SELECT 1 FROM entries en
+            JOIN results r ON r.entry_id = en.id
+            WHERE en.meet_event_id = me.id
+              AND r.place IS NOT NULL AND r.place > 0
+          )
+        ORDER BY e.sort_order, me.gender
+      `).all(meet.id)
+
+      for (const ev of meet.events) {
+        ev.results = db.prepare(`
+          SELECT r.place, r.mark, r.wind, r.is_pr,
+                 a.first_name, a.last_name, a.team
+          FROM entries en
+          JOIN results r ON r.entry_id = en.id
+          LEFT JOIN athletes a ON en.athlete_id = a.id
+          WHERE en.meet_event_id = ?
+            AND r.place IS NOT NULL AND r.place > 0
+            AND en.scratched = 0
+            AND COALESCE(r.did_not_start, 0) = 0
+            AND COALESCE(r.did_not_finish, 0) = 0
+            AND COALESCE(r.disqualified, 0) = 0
+          ORDER BY r.place ASC
+          LIMIT 20
+        `).all(ev.id)
+      }
+    }
+
+    return meets
   })
 }
 
@@ -1613,6 +1762,24 @@ function registerTeamHandlers() {
     })
     return db.prepare('SELECT * FROM team_profiles WHERE name = ?').get(name)
   })
+
+  ipcMain.handle('teams:merge', (_, { fromTeam, toTeam }) => {
+    const to = toTeam.trim()
+    const result = db.prepare(
+      "UPDATE athletes SET team=?, updated_at=datetime('now') WHERE team=? AND active=1"
+    ).run(to, fromTeam)
+    db.prepare('DELETE FROM team_profiles WHERE name=?').run(fromTeam)
+    return { success: true, count: result.changes }
+  })
+
+  ipcMain.handle('teams:delete', (_, { teamName, reassignTo }) => {
+    const target = (reassignTo || 'Pegasus Track').trim()
+    const result = db.prepare(
+      "UPDATE athletes SET team=?, updated_at=datetime('now') WHERE team=? AND active=1"
+    ).run(target, teamName)
+    db.prepare('DELETE FROM team_profiles WHERE name=?').run(teamName)
+    return { success: true, count: result.changes }
+  })
 }
 
 function registerRunathonHandlers() {
@@ -2070,7 +2237,9 @@ app.whenReady().then(() => {
   registerTeamHandlers()
   registerSyncHandlers()
   registerMeetHandlers()
+  registerPortalHandlers()
   registerScheduleHandlers()
+  registerAuthHandlers()
   registerImportHandlers()
   registerPrintHandlers()
   registerAiHandlers()

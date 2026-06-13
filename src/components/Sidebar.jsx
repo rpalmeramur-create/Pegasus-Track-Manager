@@ -10,9 +10,11 @@ import {
   TrendingUp,
   ClipboardList,
   Settings,
+  LogOut,
 } from 'lucide-react'
 import AppLogo from './AppLogo.jsx'
 import { useSettings } from '../SettingsContext.jsx'
+import { useAuth } from '../AuthContext.jsx'
 
 const NAV_ITEMS = [
   { to: '/',           icon: LayoutDashboard, label: 'Dashboard',  exact: true },
@@ -27,6 +29,7 @@ const NAV_ITEMS = [
 
 export default function Sidebar() {
   const { homeTeam } = useSettings()
+  const { user, logout } = useAuth()
   const [org, sub] = homeTeam.includes(' ')
     ? [homeTeam.split(' ').slice(0, -1).join(' '), homeTeam.split(' ').slice(-1)[0]]
     : [homeTeam, '']
@@ -72,6 +75,17 @@ export default function Sidebar() {
           <Settings size={16} strokeWidth={1.75} />
           <span>Settings</span>
         </NavLink>
+        {user && (
+          <div style={{ padding: '4px 12px 2px', fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {user.display_name || user.username}
+            </span>
+            <button className="btn btn-ghost btn-icon" style={{ padding: 3, flexShrink: 0 }}
+              title="Sign out" onClick={logout}>
+              <LogOut size={13} />
+            </button>
+          </div>
+        )}
         <div className="sidebar-version">v0.4.0</div>
       </div>
     </aside>

@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react'
-import { Cloud, CheckCircle, AlertCircle, RefreshCw, Eye, EyeOff, ExternalLink, Plus, X, Zap, Palette, Pencil } from 'lucide-react'
+import { Cloud, CheckCircle, AlertCircle, RefreshCw, Eye, EyeOff, ExternalLink, Plus, X, Zap, Palette, Pencil, Shield, Trash2, KeyRound } from 'lucide-react'
 import { THEMES, getSavedTheme, applyTheme } from '../theme.js'
 import { getAutoPrint, setAutoPrint } from '../printPrefs.js'
+import { useAuth } from '../AuthContext.jsx'
 
 // ─── Status Badge ─────────────────────────────────────────────
 function StatusBadge({ status }) {
@@ -551,6 +552,184 @@ function DataMaintenanceSection() {
   )
 }
 
+// ─── Account Management ───────────────────────────────────────
+function AccountModal({ account, onSave, onClose }) {
+  const isEdit = !!account
+  const [form, setForm] = useState({
+    username:     account?.username     ?? '',
+    display_name: account?.display_name ?? '',
+    role:         account?.role         ?? 'parent',
+    password:     '',
+    confirm:      '',
+  })
+  const [error, setError] = useState('')
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+
+  const handleSave = async () => {
+    setError('')
+    if (!isEdit && !form.username.trim()) { setError('Username is required'); return }
+    if (!isEdit && form.password.length < 4) { setError('Password must be at least 4 characters'); return }
+    if (form.password && form.password !== form.confirm) { setError('Passwords do not match'); return }
+    await onSave(form)
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 400 }} onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <div className="modal-title">{isEdit ? 'Edit Account' : 'New Account'}</div>
+          <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={15} /></button>
+        </div>
+        <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {!isEdit && (
+            <div className="form-group" style={{ margin: 0 }}>
+              <label className="form-label">Username <span style={{ color: 'var(--red)' }}>*</span></label>
+              <input className="input" value={form.username} onChange={e => set('username', e.target.value)} placeholder="e.g. parent_jones" />
+            </div>
+          )}
+          <div className="form-group" style={{ margin: 0 }}>
+            <label className="form-label">Display Name</label>
+            <input className="input" value={form.display_name} onChange={e => set('display_name', e.target.value)} placeholder="e.g. Coach Smith" />
+          </div>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label className="form-label">Role</label>
+            <select className="input" value={form.role} onChange={e => set('role', e.target.value)}>
+              <option value="admin">Admin (Full Access)</option>
+              <option value="parent">Parent (Portal Only)</option>
+            </select>
+          </div>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label className="form-label">{isEdit ? 'New Password' : 'Password'} {!isEdit && <span style={{ color: 'var(--red)' }}>*</span>}</label>
+            <input className="input" type="password" value={form.password}
+              onChange={e => set('password', e.target.value)}
+              placeholder={isEdit ? 'Leave blank to keep current' : 'Min. 4 characters'} />
+          </div>
+          {form.password && (
+            <div className="form-group" style={{ margin: 0 }}>
+              <label className="form-label">Confirm Password</label>
+              <input className="input" type="password" value={form.confirm}
+                onChange={e => set('confirm', e.target.value)} placeholder="Re-enter password" />
+            </div>
+          )}
+          {error && <div className="settings-error">{error}</div>}
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" onClick={handleSave}>
+            {isEdit ? 'Save Changes' : 'Create Account'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AccountManagementSection() {
+  const { user: currentUser } = useAuth()
+  const [users, setUsers]       = useState([])
+  const [modal, setModal]       = useState(null) // null | 'new' | { account }
+  const [msg, setMsg]           = useState('')
+  const [msgType, setMsgType]   = useState('ok')
+
+  const load = () => window.electronAPI?.authListUsers?.().then(u => setUsers(u ?? []))
+  useEffect(() => { load() }, [])
+
+  const flash = (text, type = 'ok') => { setMsg(text); setMsgType(type); setTimeout(() => setMsg(''), 3000) }
+
+  const handleSave = async (form) => {
+    if (modal?.account) {
+      // Edit existing
+      if (form.password) {
+        const r = await window.electronAPI.authUpdatePassword({ userId: modal.account.id, newPassword: form.password })
+        if (r.error) { flash(r.error, 'error'); return }
+      }
+      await window.electronAPI.authUpdateUser({ id: modal.account.id, display_name: form.display_name, role: form.role })
+      flash('Account updated.')
+    } else {
+      const r = await window.electronAPI.authCreateUser({ username: form.username, password: form.password, role: form.role, display_name: form.display_name })
+      if (r.error) { flash(r.error, 'error'); return }
+      flash('Account created.')
+    }
+    setModal(null)
+    load()
+  }
+
+  const handleDelete = async (u) => {
+    if (!window.confirm(`Delete account "${u.username}"? This cannot be undone.`)) return
+    const r = await window.electronAPI.authDeleteUser(u.id)
+    if (r.error) { flash(r.error, 'error'); return }
+    flash('Account removed.')
+    load()
+  }
+
+  const ROLE_BADGE = {
+    admin:  <span className="badge badge-gold"  style={{ fontSize: 10 }}>Admin</span>,
+    parent: <span className="badge badge-neutral" style={{ fontSize: 10 }}>Parent</span>,
+  }
+
+  return (
+    <div className="settings-section">
+      <div className="settings-section-header">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Shield size={16} style={{ color: 'var(--accent)' }} />
+          <div>
+            <div className="settings-section-title">Accounts</div>
+            <div className="settings-section-sub">Manage who can access the app and their role.</div>
+          </div>
+        </div>
+        <button className="btn btn-ghost" style={{ marginLeft: 'auto', fontSize: 12, gap: 5 }}
+          onClick={() => setModal('new')}>
+          <Plus size={13} /> New Account
+        </button>
+      </div>
+
+      <div className="settings-fields">
+        {msg && <div className={msgType === 'ok' ? 'settings-success' : 'settings-error'}>{msg}</div>}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {users.filter(u => u.active).map(u => (
+            <div key={u.id} style={{
+              display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
+              background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-md)',
+              border: '1px solid var(--border)',
+            }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>
+                  {u.display_name || u.username}
+                  {u.id === currentUser?.id && <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 6 }}>(you)</span>}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>@{u.username}</div>
+              </div>
+              {ROLE_BADGE[u.role]}
+              <button className="btn btn-ghost btn-icon" style={{ padding: 4 }}
+                title="Edit" onClick={() => setModal({ account: u })}>
+                <Pencil size={13} />
+              </button>
+              {u.id !== currentUser?.id && (
+                <button className="btn btn-ghost btn-icon" style={{ padding: 4, color: 'var(--red)' }}
+                  title="Delete" onClick={() => handleDelete(u)}>
+                  <Trash2 size={13} />
+                </button>
+              )}
+            </div>
+          ))}
+          {users.filter(u => u.active).length === 0 && (
+            <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>No accounts found.</div>
+          )}
+        </div>
+      </div>
+
+      {modal && (
+        <AccountModal
+          account={modal?.account ?? null}
+          onSave={handleSave}
+          onClose={() => setModal(null)}
+        />
+      )}
+    </div>
+  )
+}
+
 export default function Settings() {
   const [form, setForm] = useState({
     supabaseUrl: '', supabaseAnonKey: '', supabaseServiceKey: '', parentEmail: '', parentPassword: '',
@@ -708,6 +887,9 @@ export default function Settings() {
 
         {/* ── Club Info ── */}
         <ClubInfoSection form={form} setForm={f => setForm(prev => ({ ...prev, ...f }))} />
+
+        {/* ── Accounts ── */}
+        <AccountManagementSection />
 
         {/* ── Seasons ── */}
         <SeasonSection />
