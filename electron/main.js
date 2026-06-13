@@ -1336,6 +1336,164 @@ function parseTCLAsMeet(filePath) {
   return { meetName, meetDate, meetLocation, eventDescMap, athleteMap, entries }
 }
 
+// ── Hy-Tek MDB helpers ────────────────────────────────────────────────
+
+function _htekEventName(ev) {
+  if (ev.Trk_Field === 'F') {
+    const note = (ev.event_note || '').trim()
+    if (note) return note.charAt(0).toUpperCase() + note.slice(1).toLowerCase()
+    const s = ev.Event_stroke
+    if (s === 'M') return 'Standing Long Jump'
+    if (s === 'R') return 'Long Jump'
+    if (s === 'K' || s === 'V') return 'High Jump'
+    if (s === 'P') return 'Pole Vault'
+    if (s === 'T') return 'Throw'
+    if (s === 'S') return 'Shot Put'
+    if (s === 'D') return 'Discus'
+    if (s === 'J') return 'Javelin'
+    if (s === 'H') return 'Hammer'
+    // 'O' = generic throw — use age to distinguish shot put vs discus
+    if (s === 'O') return (ev.Low_age || 0) >= 11 ? 'Discus' : 'Shot Put'
+    return 'Field Event'
+  }
+  if (ev.Trk_Field === 'T') {
+    const dist = ev.Event_dist
+    const s = ev.Event_stroke
+    if (s === 'E') return `${dist} Meter Hurdles`
+    if (s === 'W') return `${dist} Meter Race Walk`
+    if (s === 'G') return `${dist}m Steeplechase`
+    if (dist >= 800 || s === 'B' || s === 'D' || s === 'C') return `${dist} Meter Run`
+    return `${dist} Meter Dash`
+  }
+  if (ev.Ind_rel === 'R') return `${ev.Event_dist} Meter Relay`
+  return 'Unknown Event'
+}
+
+function _htekFormatTime(secs) {
+  if (!secs || secs <= 0) return null
+  // Truncate (not round) to match Hy-Tek display — e.g. 11.699... → 11.69
+  const t = Math.trunc(secs * 100) / 100
+  const mins = Math.floor(t / 60)
+  const rem = t - mins * 60
+  if (mins > 0) return `${mins}:${rem.toFixed(2).padStart(5, '0')}`
+  return rem.toFixed(2)
+}
+
+function _htekFormatField(totalUnits, resMeas) {
+  if (!totalUnits || totalUnits <= 0) return null
+  if ((resMeas || 'E') === 'M') {
+    // Stored in centimeters → convert to meters string
+    const m = Math.trunc(totalUnits) / 100
+    return m.toFixed(2)
+  }
+  // English: stored in inches → convert to feet-inches (e.g. "13-02.50")
+  const ft = Math.floor(totalUnits / 12)
+  const inches = Math.trunc((totalUnits - ft * 12) * 100) / 100
+  return `${ft}-${inches.toFixed(2)}`
+}
+
+function parseHytekMDB(filePath) {
+  try {
+    const { default: MDBReader } = require('./mdb-reader-bundle.cjs')
+    const buf = require('fs').readFileSync(filePath)
+    const mdb = new MDBReader(buf)
+
+    const meetRows  = mdb.getTable('Meet').getData()
+    const eventRows = mdb.getTable('Event').getData()
+    const athRows   = mdb.getTable('Athlete').getData()
+    const teamRows  = mdb.getTable('Team').getData()
+    const entryRows = mdb.getTable('Entry').getData()
+
+    const meetRow = meetRows[0] || {}
+    const meetName = (meetRow.Meet_name1 || 'Imported Meet').trim()
+    const meetDate = meetRow.Meet_start
+      ? new Date(meetRow.Meet_start).toISOString().slice(0, 10)
+      : new Date().toISOString().slice(0, 10)
+    const meetLocation = (meetRow.Meet_location || '').trim()
+
+    // Team map: Team_no → { name, abbr }
+    const teamMap = new Map()
+    for (const t of teamRows) {
+      teamMap.set(t.Team_no, { name: (t.Team_name || '').trim(), abbr: (t.Team_abbr || '').trim() })
+    }
+
+    // Determine home team number: whichever team has the most athletes
+    const teamCounts = {}
+    for (const a of athRows) teamCounts[a.Team_no] = (teamCounts[a.Team_no] || 0) + 1
+    let homeTeamNo = null
+    let maxCount = 0
+    for (const [no, cnt] of Object.entries(teamCounts)) {
+      if (cnt > maxCount) { maxCount = cnt; homeTeamNo = Number(no) }
+    }
+
+    // Athlete map: Ath_no → info
+    const athleteMap = new Map()
+    for (const a of athRows) {
+      const dob = a.Birth_date ? new Date(a.Birth_date).toISOString().slice(0, 10) : '0000-00-00'
+      const team = teamMap.get(a.Team_no)
+      athleteMap.set(a.Ath_no, {
+        firstName: (a.First_name || '').trim(),
+        lastName:  (a.Last_name  || '').trim(),
+        gender:    a.Ath_Sex === 'F' ? 'F' : 'M',
+        dob,
+        teamNo:    a.Team_no,
+        team:      team ? team.name : 'Unknown',
+        compNo:    a.Comp_no || null,
+      })
+    }
+
+    // Event map: Event_ptr → detail
+    const events = new Map()
+    for (const ev of eventRows) {
+      const name = _htekEventName(ev)
+      const gender = ev.Event_gender === 'F' ? 'F' : (ev.Event_gender === 'M' ? 'M' : 'mixed')
+      const ageGroup = (ev.High_Age && ev.High_Age < 99) ? `${ev.Low_age}-${ev.High_Age}` : null
+      const category = ev.Ind_rel === 'R' ? 'relay'
+                     : ev.Trk_Field === 'T' ? 'track' : 'field'
+      const measurementUnit = category === 'track' || category === 'relay' ? 'time' : 'distance'
+      events.set(ev.Event_ptr, { name, gender, ageGroup, category, measurementUnit, resMeas: ev.Res_Meas || 'E' })
+    }
+
+    // Filter and build entries
+    const entries = []
+    for (const en of entryRows) {
+      // Skip if not assigned to a heat (never competed)
+      if (!en.Fin_heat && en.Fin_place === 0 && !en.Fin_Time) continue
+      const evDetail = events.get(en.Event_ptr)
+      if (!evDetail) continue
+
+      const scratched = en.Scr_stat ? 1 : 0
+      const isDQ  = en.Fin_stat === 'Q' || !!en.dq_type
+      const isDNS = !scratched && !isDQ && (!en.Fin_Time || en.Fin_Time <= 0) && (!en.Fin_place || en.Fin_place <= 0)
+
+      let mark = null
+      if (!scratched && !isDNS && !isDQ && en.Fin_Time && en.Fin_Time > 0) {
+        mark = evDetail.category === 'track' || evDetail.category === 'relay'
+          ? _htekFormatTime(en.Fin_Time)
+          : _htekFormatField(en.Fin_Time, evDetail.resMeas)
+      }
+
+      entries.push({
+        eventPtr: en.Event_ptr,
+        athNo:    en.Ath_no,
+        heat:     en.Fin_heat || null,
+        lane:     en.Fin_lane || null,
+        place:    en.Fin_place > 0 ? en.Fin_place : null,
+        mark,
+        wind:     en.Fin_wind || null,
+        scratched,
+        isDNS,
+        isDQ,
+        dqReason: en.dq_type || null,
+      })
+    }
+
+    return { meetName, meetDate, meetLocation, events, athleteMap, entries, homeTeamNo, teamMap }
+  } catch (err) {
+    return { error: err.message }
+  }
+}
+
 function registerImportHandlers() {
   ipcMain.handle('import:tcl', async () => {
     try {
@@ -1560,6 +1718,210 @@ function registerImportHandlers() {
       return { ...result, visitingInDB }
     } catch (err) {
       console.error('TCL meet import error:', err)
+      return { error: err.message }
+    }
+  })
+
+  ipcMain.handle('import:hytek', async (_, filePath) => {
+    try {
+      let resolvedPath = filePath
+      if (!resolvedPath) {
+        const res = await dialog.showOpenDialog({
+          title: 'Import Hy-Tek Meet Database',
+          filters: [
+            { name: 'Hy-Tek Meet Database', extensions: ['mdb', 'MDB'] },
+            { name: 'All Files', extensions: ['*'] },
+          ],
+          properties: ['openFile'],
+        })
+        if (res.canceled || !res.filePaths.length) return null
+        resolvedPath = res.filePaths[0]
+      }
+
+      const parsed = parseHytekMDB(resolvedPath)
+      if (parsed.error) return { error: parsed.error }
+
+      const { meetName, meetDate, meetLocation, events, athleteMap, entries, homeTeamNo, teamMap } = parsed
+
+      // Determine home team name from existing Pegasus DB
+      const homeTeamRow = db.prepare(
+        `SELECT team, COUNT(*) cnt FROM athletes WHERE active=1 AND team!='' GROUP BY team ORDER BY cnt DESC LIMIT 1`
+      ).get()
+      const homeTeamName = homeTeamRow?.team || 'Pegasus Track'
+      console.log('[Hy-Tek import] home team:', homeTeamName, '| MDB home team no:', homeTeamNo, teamMap.get(homeTeamNo)?.name)
+
+      // tf_events cache — find or create
+      const tfEventRows = db.prepare('SELECT id, name, category, measurement_unit FROM tf_events').all()
+      const tfByName = new Map(tfEventRows.map(e => [e.name.toLowerCase(), e]))
+
+      const importFn = db.transaction(() => {
+        function getOrCreateTfEvent(name, category, measurementUnit) {
+          const key = name.toLowerCase()
+          if (tfByName.has(key)) return tfByName.get(key)
+          const abbr = name.replace(/\s+/g, '').slice(0, 8)
+          const r = db.prepare(
+            `INSERT INTO tf_events (name, abbreviation, category, measurement_unit, is_custom, sort_order)
+             VALUES (?, ?, ?, ?, 1, 999)`
+          ).run(name, abbr, category, measurementUnit)
+          const newEvt = { id: r.lastInsertRowid, name, category, measurement_unit: measurementUnit }
+          tfByName.set(key, newEvt)
+          return newEvt
+        }
+
+        // ── Meet ──────────────────────────────────────────────────
+        const meetRow = db.prepare(
+          `INSERT INTO meets (name, date, type, status, location) VALUES (?,?,?,?,?)`
+        ).run(meetName, meetDate, 'invitational', 'completed', meetLocation)
+        const meetId = meetRow.lastInsertRowid
+
+        // ── Meet events ───────────────────────────────────────────
+        const meetEventMap = new Map()   // Event_ptr → { meid, tfEvent }
+        const comboToMeid  = new Map()   // "tfId_gender_ag" → meid
+        const stmtME = db.prepare(
+          `INSERT INTO meet_events (meet_id, tf_event_id, gender, age_group, round, sort_order) VALUES (?,?,?,?,?,?)`
+        )
+        for (const [evPtr, evDetail] of events) {
+          const tfEvent = getOrCreateTfEvent(evDetail.name, evDetail.category, evDetail.measurementUnit)
+          const ck = `${tfEvent.id}_${evDetail.gender}_${evDetail.ageGroup || ''}`
+          if (!comboToMeid.has(ck)) {
+            const r = stmtME.run(meetId, tfEvent.id, evDetail.gender, evDetail.ageGroup || null, 'final', evPtr)
+            comboToMeid.set(ck, r.lastInsertRowid)
+          }
+          meetEventMap.set(evPtr, { meid: comboToMeid.get(ck), tfEvent })
+        }
+
+        // ── Athletes (match or create) ─────────────────────────────
+        const findByName = db.prepare(
+          `SELECT id, active, team FROM athletes
+           WHERE lower(first_name)=lower(?) AND lower(last_name)=lower(?)
+           ORDER BY id LIMIT 1`
+        )
+        const findByNameDob = db.prepare(
+          `SELECT id FROM athletes
+           WHERE lower(first_name)=lower(?) AND lower(last_name)=lower(?) AND date_of_birth=?
+           ORDER BY id LIMIT 1`
+        )
+        const fixAndActivate = db.prepare(
+          "UPDATE athletes SET active=1, team=?, updated_at=datetime('now') WHERE id=?"
+        )
+        const insertAth = db.prepare(
+          `INSERT INTO athletes (first_name, last_name, date_of_birth, gender, team, active)
+           VALUES (@fn, @ln, @dob, @g, @team, @active)`
+        )
+        const athIdCache = new Map()
+        let athFound = 0, athCreated = 0
+
+        function resolveAthlete(athNo) {
+          if (athIdCache.has(athNo)) return athIdCache.get(athNo)
+          const info = athleteMap.get(athNo)
+          if (!info) return null
+
+          const isHome = info.teamNo === homeTeamNo
+          const teamName = isHome ? homeTeamName : info.team
+          const active   = isHome ? 1 : 0
+
+          // Try exact name+DOB match first, then name-only
+          let row = info.dob && info.dob !== '0000-00-00'
+            ? findByNameDob.get(info.firstName, info.lastName, info.dob)
+            : null
+          if (!row) row = findByName.get(info.firstName, info.lastName)
+
+          if (row) {
+            if (isHome) {
+              fixAndActivate.run(teamName, row.id)
+              athFound++
+              athIdCache.set(athNo, row.id)
+              return row.id
+            } else {
+              // For visiting athletes: only reuse the existing record if the stored team matches.
+              // If the name matched a home-team (Pegasus) athlete, don't steal that record —
+              // create a new inactive visitor entry instead.
+              if ((row.team || '').toLowerCase() === teamName.toLowerCase()) {
+                athFound++
+                athIdCache.set(athNo, row.id)
+                return row.id
+              }
+              // Team mismatch — fall through to INSERT a new visitor athlete
+            }
+          }
+
+          try {
+            const ins = insertAth.run({ fn: info.firstName, ln: info.lastName, dob: info.dob, g: info.gender, team: teamName, active })
+            athCreated++
+            athIdCache.set(athNo, ins.lastInsertRowid)
+            return ins.lastInsertRowid
+          } catch (e) {
+            console.error('[Hy-Tek] insert athlete failed', info, e.message)
+            return null
+          }
+        }
+
+        // ── Entries and results ───────────────────────────────────
+        const stmtEntry = db.prepare(
+          `INSERT INTO entries (meet_event_id, athlete_id, heat, lane, scratched) VALUES (?,?,?,?,?)`
+        )
+        const checkDupe = db.prepare('SELECT id FROM entries WHERE meet_event_id=? AND athlete_id=?')
+        const stmtRes   = db.prepare(
+          `INSERT INTO results (entry_id, mark, wind, place, disqualified, dq_reason, did_not_start, did_not_finish, hand_timed, is_pr)
+           VALUES (?,?,?,?,?,?,?,0,0,0)`
+        )
+        const stmtGetPR  = db.prepare('SELECT mark FROM personal_records WHERE athlete_id=? AND tf_event_id=? AND indoor=0')
+        const stmtSetPR  = db.prepare('UPDATE results SET is_pr=1 WHERE id=?')
+        const stmtUpsert = db.prepare(
+          `INSERT INTO personal_records (athlete_id, tf_event_id, mark, indoor, updated_at) VALUES (?,?,?,0,datetime('now'))
+           ON CONFLICT(athlete_id,tf_event_id,indoor) DO UPDATE SET mark=excluded.mark, updated_at=datetime('now')`
+        )
+
+        let entriesAdded = 0, resultsAdded = 0
+        let skippedNoEvent = 0, skippedNoAthlete = 0, skippedDupe = 0
+
+        for (const en of entries) {
+          const ev = meetEventMap.get(en.eventPtr)
+          if (!ev) { skippedNoEvent++; continue }
+
+          const athleteId = resolveAthlete(en.athNo)
+          if (!athleteId) { skippedNoAthlete++; continue }
+
+          if (checkDupe.get(ev.meid, athleteId)) { skippedDupe++; continue }
+
+          const entryId = stmtEntry.run(ev.meid, athleteId, en.heat, en.lane, en.scratched).lastInsertRowid
+          entriesAdded++
+
+          const resultId = stmtRes.run(
+            entryId, en.mark, en.wind, en.place,
+            en.isDQ ? 1 : 0, en.dqReason,
+            en.isDNS ? 1 : 0
+          ).lastInsertRowid
+          resultsAdded++
+
+          if (en.mark && !en.isDNS && !en.isDQ && en.place) {
+            try {
+              const newVal = parseMark(en.mark, ev.tfEvent.category)
+              if (newVal !== null) {
+                const existing = stmtGetPR.get(athleteId, ev.tfEvent.id)
+                const prVal    = existing ? parseMark(existing.mark, ev.tfEvent.category) : null
+                const isField  = ev.tfEvent.category === 'field'
+                if (prVal === null || (isField ? newVal > prVal : newVal < prVal)) {
+                  stmtSetPR.run(resultId)
+                  stmtUpsert.run(athleteId, ev.tfEvent.id, en.mark)
+                }
+              }
+            } catch (_) {}
+          }
+        }
+
+        console.log('[Hy-Tek import] DONE', { eventsAdded: comboToMeid.size, entriesAdded, resultsAdded, athFound, athCreated })
+        return {
+          meetId, meetName, eventsAdded: comboToMeid.size,
+          entriesAdded, resultsAdded,
+          skippedNoEvent, skippedNoAthlete, skippedDupe,
+          athFound, athCreated,
+        }
+      })
+
+      return importFn()
+    } catch (err) {
+      console.error('[Hy-Tek import] error:', err)
       return { error: err.message }
     }
   })
