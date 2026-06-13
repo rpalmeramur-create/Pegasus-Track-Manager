@@ -1791,18 +1791,21 @@ function registerImportHandlers() {
         }
 
         // ── Athletes (match or create) ─────────────────────────────
+        const findByNameDob = db.prepare(
+          `SELECT id, team, active FROM athletes
+           WHERE lower(first_name)=lower(?) AND lower(last_name)=lower(?) AND date_of_birth=?
+           ORDER BY id LIMIT 1`
+        )
         const findByName = db.prepare(
           `SELECT id, active, team FROM athletes
            WHERE lower(first_name)=lower(?) AND lower(last_name)=lower(?)
            ORDER BY id LIMIT 1`
         )
-        const findByNameDob = db.prepare(
-          `SELECT id FROM athletes
-           WHERE lower(first_name)=lower(?) AND lower(last_name)=lower(?) AND date_of_birth=?
-           ORDER BY id LIMIT 1`
-        )
         const fixAndActivate = db.prepare(
           "UPDATE athletes SET active=1, team=?, updated_at=datetime('now') WHERE id=?"
+        )
+        const fixVisitorTeam = db.prepare(
+          "UPDATE athletes SET team=?, updated_at=datetime('now') WHERE id=?"
         )
         const insertAth = db.prepare(
           `INSERT INTO athletes (first_name, last_name, date_of_birth, gender, team, active)
@@ -1820,7 +1823,7 @@ function registerImportHandlers() {
           const teamName = isHome ? homeTeamName : info.team
           const active   = isHome ? 1 : 0
 
-          // Try exact name+DOB match first, then name-only
+          // Try exact name+DOB match first (preferred), then name-only
           let row = info.dob && info.dob !== '0000-00-00'
             ? findByNameDob.get(info.firstName, info.lastName, info.dob)
             : null
@@ -1828,21 +1831,35 @@ function registerImportHandlers() {
 
           if (row) {
             if (isHome) {
+              // Home athlete — link and ensure active + correct team name
               fixAndActivate.run(teamName, row.id)
               athFound++
               athIdCache.set(athNo, row.id)
               return row.id
-            } else {
-              // For visiting athletes: only reuse the existing record if the stored team matches.
-              // If the name matched a home-team (Pegasus) athlete, don't steal that record —
-              // create a new inactive visitor entry instead.
-              if ((row.team || '').toLowerCase() === teamName.toLowerCase()) {
-                athFound++
-                athIdCache.set(athNo, row.id)
-                return row.id
-              }
-              // Team mismatch — fall through to INSERT a new visitor athlete
             }
+
+            // Visiting athlete: only reuse a record if it belongs to the same team.
+            // If the found record is a home-team (active=1) athlete with the same name,
+            // don't steal it — create a new inactive visitor record instead.
+            const rowTeam = (row.team || '').toLowerCase()
+            if (rowTeam === teamName.toLowerCase()) {
+              athFound++
+              athIdCache.set(athNo, row.id)
+              return row.id
+            }
+
+            // Team mismatch. If the existing record is inactive (e.g., from a previous
+            // import that assigned the wrong team), correct the team in place rather
+            // than creating a duplicate athlete.
+            if (row.active === 0) {
+              fixVisitorTeam.run(teamName, row.id)
+              athFound++
+              athIdCache.set(athNo, row.id)
+              return row.id
+            }
+
+            // Existing record is active (a home-team athlete with the same name) —
+            // fall through to create a brand-new inactive visitor record.
           }
 
           try {
