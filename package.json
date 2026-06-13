@@ -11,6 +11,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "electron": "electron .",
+    "predist": "node -e \"const fs=require('fs');try{fs.readdirSync('release').filter(f=>/\\.(exe|blockmap)$/.test(f)).forEach(f=>{try{fs.unlinkSync('release/'+f)}catch(e){}});}catch(e){}\"",
     "dist": "vite build && electron-builder --win --x64",
     "dist:dir": "vite build && electron-builder --win --dir",
     "postinstall": "node scripts/install-bsql-electron.cjs"
