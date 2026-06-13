@@ -713,7 +713,22 @@ function registerMeetHandlers() {
   })
 
   ipcMain.handle('meets:delete', (_, id) => {
-    db.prepare('DELETE FROM meets WHERE id=?').run(id)
+    db.transaction(() => {
+      // Delete in FK dependency order
+      db.prepare('DELETE FROM personal_records WHERE meet_id=?').run(id)
+      db.prepare('DELETE FROM attendance WHERE meet_id=?').run(id)
+      db.prepare('DELETE FROM records WHERE meet_id=?').run(id)
+      const evIds = db.prepare('SELECT id FROM meet_events WHERE meet_id=?').all(id).map(r => r.id)
+      for (const evId of evIds) {
+        const entryIds = db.prepare('SELECT id FROM entries WHERE meet_event_id=?').all(evId).map(r => r.id)
+        for (const entId of entryIds) {
+          db.prepare('DELETE FROM results WHERE entry_id=?').run(entId)
+        }
+        db.prepare('DELETE FROM entries WHERE meet_event_id=?').run(evId)
+      }
+      db.prepare('DELETE FROM meet_events WHERE meet_id=?').run(id)
+      db.prepare('DELETE FROM meets WHERE id=?').run(id)
+    })()
     return { success: true }
   })
 
@@ -1811,11 +1826,11 @@ function registerImportHandlers() {
           "UPDATE athletes SET active=1, team=?, updated_at=datetime('now') WHERE id=?"
         )
         const fixVisitorTeam = db.prepare(
-          "UPDATE athletes SET team=?, updated_at=datetime('now') WHERE id=?"
+          "UPDATE athletes SET team=?, active=1, updated_at=datetime('now') WHERE id=?"
         )
         const insertAth = db.prepare(
           `INSERT INTO athletes (first_name, last_name, date_of_birth, gender, team, active)
-           VALUES (@fn, @ln, @dob, @g, @team, @active)`
+           VALUES (@fn, @ln, @dob, @g, @team, 1)`
         )
         const athIdCache = new Map()
         let athFound = 0, athCreated = 0
@@ -1825,9 +1840,8 @@ function registerImportHandlers() {
           const info = athleteMap.get(athNo)
           if (!info) return null
 
-          const isHome = info.teamNo === homeTeamNo
+          const isHome   = info.teamNo === homeTeamNo
           const teamName = isHome ? homeTeamName : info.team
-          const active   = isHome ? 1 : 0
 
           // Try exact name+DOB match first (preferred), then name-only
           let row = info.dob && info.dob !== '0000-00-00'
@@ -1837,26 +1851,27 @@ function registerImportHandlers() {
 
           if (row) {
             if (isHome) {
-              // Home athlete — link and ensure active + correct team name
+              // Home athlete — ensure active + correct team name
               fixAndActivate.run(teamName, row.id)
               athFound++
               athIdCache.set(athNo, row.id)
               return row.id
             }
 
-            // Visiting athlete: only reuse a record if it belongs to the same team.
-            // If the found record is a home-team (active=1) athlete with the same name,
-            // don't steal it — create a new inactive visitor record instead.
+            // Visiting athlete: only reuse this record if it belongs to the same team.
+            // A home-team (Pegasus) athlete with the same name is a different person —
+            // don't steal that record.
             const rowTeam = (row.team || '').toLowerCase()
             if (rowTeam === teamName.toLowerCase()) {
+              // Same team — ensure active=1 so they appear in the Teams tab
+              if (!row.active) fixVisitorTeam.run(teamName, row.id)
               athFound++
               athIdCache.set(athNo, row.id)
               return row.id
             }
 
-            // Team mismatch. If the existing record is inactive (e.g., from a previous
-            // import that assigned the wrong team), correct the team in place rather
-            // than creating a duplicate athlete.
+            // Team mismatch on an inactive record (stale from a previous buggy import) —
+            // correct the team and activate so the athlete appears in the Teams tab.
             if (row.active === 0) {
               fixVisitorTeam.run(teamName, row.id)
               athFound++
@@ -1864,12 +1879,12 @@ function registerImportHandlers() {
               return row.id
             }
 
-            // Existing record is active (a home-team athlete with the same name) —
-            // fall through to create a brand-new inactive visitor record.
+            // Active record with a different team (a home athlete with the same name) —
+            // fall through to create a new visitor record.
           }
 
           try {
-            const ins = insertAth.run({ fn: info.firstName, ln: info.lastName, dob: info.dob, g: info.gender, team: teamName, active })
+            const ins = insertAth.run({ fn: info.firstName, ln: info.lastName, dob: info.dob, g: info.gender, team: teamName })
             athCreated++
             athIdCache.set(athNo, ins.lastInsertRowid)
             return ins.lastInsertRowid
