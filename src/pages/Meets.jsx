@@ -1990,8 +1990,8 @@ function PrintHeatSheetModal({ meet, meetDetail, onClose }) {
     if (meetDetail.events.length === 0) { setLoading(false); return }
     const hasRelays = meetDetail.events.some(ev => ev.category === 'relay')
     Promise.all([
-      Promise.all(meetDetail.events.map(ev => api.getMeetEventEntries(ev.id))),
-      hasRelays ? api.getRelayLegsForMeet(meet.id) : Promise.resolve({}),
+      Promise.all(meetDetail.events.map(ev => api.getMeetEventEntries(ev.id).catch(() => null))),
+      hasRelays ? api.getRelayLegsForMeet(meet.id).catch(() => ({})) : Promise.resolve({}),
     ]).then(([data, legs]) => {
       setEventsData(data.filter(Boolean))
       setRelayLegsByEntry(legs ?? {})

@@ -819,7 +819,7 @@ function registerMeetHandlers() {
     if (!ev) return null
     const entries = db.prepare(`
       SELECT en.*,
-        a.first_name, a.last_name, a.gender AS athlete_gender, a.team,
+        a.first_name, a.last_name, a.gender AS athlete_gender, a.team, a.athlete_number,
         CAST((julianday('now')-julianday(a.date_of_birth))/365.25 AS INTEGER) AS athlete_age,
         r.id AS result_id, r.mark, r.place, r.wind,
         r.disqualified, r.dq_reason, r.did_not_start, r.did_not_finish,
@@ -832,42 +832,45 @@ function registerMeetHandlers() {
     `).all(meetEventId)
 
     // Auto-fill seed_mark from prior meet results for entries that have none
-    const needsSeed = entries.filter(e => !e.seed_mark && e.athlete_id)
-    if (needsSeed.length > 0) {
-      const meetDate = db.prepare('SELECT date FROM meets WHERE id=?').get(ev.meet_id)?.date
-      const isField = ev.category === 'field' || ev.category === 'combined'
-      const priorMarks = db.prepare(`
-        SELECT e2.athlete_id, r2.mark
-        FROM results r2
-        JOIN entries e2   ON r2.entry_id       = e2.id
-        JOIN meet_events me2 ON e2.meet_event_id = me2.id
-        JOIN meets m2        ON me2.meet_id       = m2.id
-        WHERE e2.athlete_id IN (${needsSeed.map(() => '?').join(',')})
-          AND me2.tf_event_id = ?
-          AND m2.date < ?
-          AND r2.mark IS NOT NULL AND r2.mark != ''
-          AND r2.did_not_start = 0 AND r2.did_not_finish = 0 AND r2.disqualified = 0
-      `).all(...needsSeed.map(e => e.athlete_id), ev.tf_event_id, meetDate)
+    try {
+      const needsSeed = entries.filter(e => !e.seed_mark && e.athlete_id)
+      if (needsSeed.length > 0) {
+        const meetDate = db.prepare('SELECT date FROM meets WHERE id=?').get(ev.meet_id)?.date
+        const isField = ev.category === 'field' || ev.category === 'combined'
+        const priorMarks = db.prepare(`
+          SELECT e2.athlete_id, r2.mark
+          FROM results r2
+          JOIN entries e2      ON r2.entry_id        = e2.id
+          JOIN meet_events me2 ON e2.meet_event_id   = me2.id
+          JOIN meets m2        ON me2.meet_id         = m2.id
+          WHERE e2.athlete_id IN (${needsSeed.map(() => '?').join(',')})
+            AND me2.tf_event_id = ?
+            AND r2.mark IS NOT NULL AND r2.mark != ''
+            AND r2.did_not_start = 0 AND r2.did_not_finish = 0 AND r2.disqualified = 0
+            ${meetDate ? 'AND m2.date < ?' : ''}
+        `).all(...needsSeed.map(e => e.athlete_id), ev.tf_event_id, ...(meetDate ? [meetDate] : []))
 
-      // Group by athlete and pick best
-      const bestByAthlete = {}
-      for (const row of priorMarks) {
-        const v = parseMark(row.mark, ev.category)
-        if (v === null) continue
-        const cur = bestByAthlete[row.athlete_id]
-        if (!cur || (isField ? v > cur.v : v < cur.v)) {
-          bestByAthlete[row.athlete_id] = { mark: row.mark, v }
+        const bestByAthlete = {}
+        for (const row of priorMarks) {
+          const v = parseMark(row.mark, ev.category)
+          if (v === null) continue
+          const cur = bestByAthlete[row.athlete_id]
+          if (!cur || (isField ? v > cur.v : v < cur.v)) {
+            bestByAthlete[row.athlete_id] = { mark: row.mark, v }
+          }
+        }
+
+        const updateSeed = db.prepare('UPDATE entries SET seed_mark=? WHERE id=?')
+        for (const entry of needsSeed) {
+          const best = bestByAthlete[entry.athlete_id]
+          if (best) {
+            updateSeed.run(best.mark, entry.id)
+            entry.seed_mark = best.mark
+          }
         }
       }
-
-      const updateSeed = db.prepare('UPDATE entries SET seed_mark=? WHERE id=?')
-      for (const entry of needsSeed) {
-        const best = bestByAthlete[entry.athlete_id]
-        if (best) {
-          updateSeed.run(best.mark, entry.id)
-          entry.seed_mark = best.mark
-        }
-      }
+    } catch (e) {
+      console.error('[seed-fill] failed for meetEventId', meetEventId, e.message)
     }
 
     return { ...ev, entries }
