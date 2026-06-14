@@ -1,6 +1,10 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, shell, session } = require('electron')
 const path = require('path')
 const fs   = require('fs')
+
+// Prevent Chromium from caching HTTP responses — this app is offline/local
+// and the cache only accumulates stale AI/sync responses over time.
+app.commandLine.appendSwitch('disable-http-cache')
 
 const isDev = !app.isPackaged
 let db
@@ -856,6 +860,34 @@ function registerMeetHandlers() {
   ipcMain.handle('entries:remove', (_, id) => {
     db.prepare('DELETE FROM entries WHERE id=?').run(id)
     return { success: true }
+  })
+
+  ipcMain.handle('entries:getAthleteBestMark', (_, athleteId, tfEventId) => {
+    // Pull all valid marks from results (not just PRs — import may skip place-less results)
+    const rows = db.prepare(`
+      SELECT r.mark, tfe.category
+      FROM results r
+      JOIN entries e   ON r.entry_id       = e.id
+      JOIN meet_events me ON e.meet_event_id = me.id
+      JOIN tf_events tfe  ON me.tf_event_id  = tfe.id
+      WHERE e.athlete_id = ?
+        AND me.tf_event_id = ?
+        AND r.mark IS NOT NULL AND r.mark != ''
+        AND r.did_not_start = 0 AND r.did_not_finish = 0 AND r.disqualified = 0
+    `).all(athleteId, tfEventId)
+
+    if (!rows.length) return null
+    const isField = rows[0].category === 'field' || rows[0].category === 'combined'
+    let best = null, bestVal = null
+    for (const row of rows) {
+      const v = parseMark(row.mark, rows[0].category)
+      if (v === null) continue
+      if (bestVal === null || (isField ? v > bestVal : v < bestVal)) {
+        best = row.mark
+        bestVal = v
+      }
+    }
+    return best
   })
 
   ipcMain.handle('entries:updateSeed', (_, id, seedMark) => {
@@ -2627,7 +2659,9 @@ function registerTemplateHandlers() {
   })
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // One-time cleanup of any existing HTTP cache accumulated from prior versions
+  try { await session.defaultSession.clearCache() } catch (_) {}
   initDatabase()
   registerAthleteHandlers()
   registerDashboardHandlers()

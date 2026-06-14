@@ -205,6 +205,24 @@ const FALLBACK = {
     else _db.results.push({ id: _id(), entry_id: entryId, ...row })
     return Promise.resolve({ success: true, is_pr: isPr })
   },
+  getAthleteBestMark: (athleteId, tfEventId) => {
+    const rows = _db.results.filter(r => {
+      const en  = _db.entries.find(e => e.id === r.entry_id)
+      const ev  = en ? _db.meetEvents.find(m => m.id === en.meet_event_id) : null
+      return en?.athlete_id === athleteId && ev?.tf_event_id === tfEventId &&
+        r.mark && !r.did_not_start && !r.did_not_finish && !r.disqualified
+    })
+    const ev = _db.meetEvents.find(m => m.tf_event_id === tfEventId)
+    const cat = ev?.category || 'track'
+    const isField = cat === 'field' || cat === 'combined'
+    let best = null, bestVal = null
+    for (const row of rows) {
+      const v = _parseMark(row.mark, cat)
+      if (v === null) continue
+      if (bestVal === null || (isField ? v > bestVal : v < bestVal)) { best = row.mark; bestVal = v }
+    }
+    return Promise.resolve(best ?? _db.prs[`${athleteId}_${tfEventId}`] ?? null)
+  },
   autoRank:  () => Promise.resolve({ success: true }),
   seedEvent: () => Promise.resolve({ success: true }),
   getAthletes: athleteApi.getAthletes,
@@ -1019,11 +1037,12 @@ function WorksheetTab({ meet, meetDetail }) {
   }
 
   const handleAddAthlete = async (athlete) => {
-    const res = await api.addEntry({ meet_event_id: selectedEvent.id, athlete_id: athlete.id })
+    const bestMark = await api.getAthleteBestMark(athlete.id, selectedEvent.tf_event_id)
+    const res = await api.addEntry({ meet_event_id: selectedEvent.id, athlete_id: athlete.id, seed_mark: bestMark || null })
     if (res?.error) { alert(res.error); return }
     setEventDetail(d => ({ ...d, entries: [...d.entries, res] }))
     setResults(r => ({ ...r, [res.id]: {
-      seed_mark: '', mark: '', wind: '',
+      seed_mark: bestMark || '', mark: '', wind: '',
       did_not_start: false, did_not_finish: false, disqualified: false,
       place: null, is_pr: false, attempts_json: null,
     }}))
@@ -2265,46 +2284,11 @@ function PrintHeatSheetModal({ meet, meetDetail, onClose }) {
         {/* Body */}
         <div className="no-print" style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
 
-          {/* Left sidebar: events + format */}
+          {/* Left sidebar: format + events */}
           <div style={{ width: 230, flexShrink: 0, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
-            {/* Events section */}
-            <div style={{ padding: '8px 12px 6px', borderBottom: '1px solid var(--border)' }}>
-              <div style={{ ...sectionLabel, marginBottom: 5 }}>Events</div>
-              <div style={{ display: 'flex', gap: 4 }}>
-                <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 8px', flex: 1 }} onClick={selectAll}>All</button>
-                <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 8px', flex: 1 }} onClick={selectNone}>None</button>
-              </div>
-            </div>
-            <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
-              {activeEvents.length === 0
-                ? <div style={{ padding: '12px', fontSize: 12, color: 'var(--text-muted)' }}>No events with entries.</div>
-                : activeEvents.map(ev => {
-                    const checked = effectiveIds.has(ev.id)
-                    const gStr = ev.gender === 'M' ? 'B' : ev.gender === 'F' ? 'G' : 'X'
-                    return (
-                      <label key={ev.id} style={{
-                        display: 'flex', alignItems: 'flex-start', gap: 8, padding: '6px 12px',
-                        cursor: 'pointer', fontSize: 12,
-                        background: checked ? 'rgba(56,189,248,0.08)' : 'transparent',
-                        borderLeft: checked ? '2px solid var(--acc)' : '2px solid transparent',
-                      }}>
-                        <input type="checkbox" checked={checked} onChange={() => toggleId(ev.id)}
-                          style={{ marginTop: 2, accentColor: 'var(--acc)' }} />
-                        <span>
-                          <span style={{ fontWeight: 500 }}>{ev.event_name}</span>
-                          <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>
-                            {gStr}{ev.age_group ? ` ${ev.age_group}` : ''}
-                          </span>
-                        </span>
-                      </label>
-                    )
-                  })
-              }
-            </div>
-
-            {/* Format options */}
-            <div style={{ borderTop: '1px solid var(--border)', padding: '10px 12px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {/* Format options — always visible at top */}
+            <div style={{ borderBottom: '1px solid var(--border)', padding: '10px 12px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div style={sectionLabel}>Format</div>
 
               <div>
@@ -2338,12 +2322,47 @@ function PrintHeatSheetModal({ meet, meetDetail, onClose }) {
                 ))}
               </div>
             </div>
+
+            {/* Events section */}
+            <div style={{ padding: '8px 12px 6px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+              <div style={{ ...sectionLabel, marginBottom: 5 }}>Events</div>
+              <div style={{ display: 'flex', gap: 4 }}>
+                <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 8px', flex: 1 }} onClick={selectAll}>All</button>
+                <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 8px', flex: 1 }} onClick={selectNone}>None</button>
+              </div>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
+              {activeEvents.length === 0
+                ? <div style={{ padding: '12px', fontSize: 12, color: 'var(--text-muted)' }}>No events with entries.</div>
+                : activeEvents.map(ev => {
+                    const checked = effectiveIds.has(ev.id)
+                    const gStr = ev.gender === 'M' ? 'B' : ev.gender === 'F' ? 'G' : 'X'
+                    return (
+                      <label key={ev.id} style={{
+                        display: 'flex', alignItems: 'flex-start', gap: 8, padding: '6px 12px',
+                        cursor: 'pointer', fontSize: 12,
+                        background: checked ? 'rgba(56,189,248,0.08)' : 'transparent',
+                        borderLeft: checked ? '2px solid var(--acc)' : '2px solid transparent',
+                      }}>
+                        <input type="checkbox" checked={checked} onChange={() => toggleId(ev.id)}
+                          style={{ marginTop: 2, accentColor: 'var(--acc)' }} />
+                        <span>
+                          <span style={{ fontWeight: 500 }}>{ev.event_name}</span>
+                          <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>
+                            {gStr}{ev.age_group ? ` ${ev.age_group}` : ''}
+                          </span>
+                        </span>
+                      </label>
+                    )
+                  })
+              }
+            </div>
           </div>
 
           {/* Preview — printRef points here so innerHTML is the print target */}
-          <div ref={printRef} style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
+          <div ref={printRef} className="print-canvas-scroll">
             {pages.length === 0
-              ? <div style={{ color: 'var(--text-muted)', fontSize: 13, padding: 24 }}>Select at least one event to preview.</div>
+              ? <div style={{ color: '#bbb', fontSize: 13, padding: 24, textAlign: 'center' }}>Select at least one event to preview.</div>
               : pages
             }
           </div>
@@ -2496,7 +2515,7 @@ function PrintEventHeatSheetModal({ meet, eventDetail, onClose }) {
           </div>
         </div>
 
-        <div ref={printRef}><div className="print-sheet">
+        <div className="print-canvas"><div ref={printRef}><div className="print-sheet">
           <div className="ps-header">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div>
@@ -2580,7 +2599,7 @@ function PrintEventHeatSheetModal({ meet, eventDetail, onClose }) {
               )}
             </>
           )}
-        </div></div>
+        </div></div></div>
       </div>
     </div>
   )
@@ -2889,7 +2908,7 @@ function PrintMeetModal({ meet, eventsData: initData, onClose }) {
           </div>
         </div>
 
-        <div ref={printRef}>
+        <div className="print-canvas"><div ref={printRef}>
         {events.length === 0 ? (
           <div className="print-sheet">
             <div className="ps-header">
@@ -3021,7 +3040,7 @@ function PrintMeetModal({ meet, eventsData: initData, onClose }) {
             )
           })
         )}
-        </div>
+        </div></div>
       </div>
     </div>
   )
@@ -3087,7 +3106,7 @@ function PrintResultsModal({ meet, event, entries, results, onClose }) {
         </div>
 
         {/* 8.5×11 sheet */}
-        <div ref={printRef}><div className="print-sheet">
+        <div className="print-canvas"><div ref={printRef}><div className="print-sheet">
           {/* Club + meet header */}
           <div className="ps-header">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -3175,7 +3194,7 @@ function PrintResultsModal({ meet, event, entries, results, onClose }) {
             Generated {new Date().toLocaleDateString('en-US')} · Pegasus Track Management
             {' · '}★ = Personal Record
           </div>
-        </div></div>
+        </div></div></div>
       </div>
     </div>
   )
@@ -3330,7 +3349,7 @@ function PrintRunathonModal({ meet, entries, onClose }) {
           </div>
         </div>
 
-        <div ref={printRef}>
+        <div className="print-canvas"><div ref={printRef}>
           <div className="print-sheet">
             {/* Header */}
             <div className="ps-header">
@@ -3427,7 +3446,7 @@ function PrintRunathonModal({ meet, entries, onClose }) {
               <span>Printed {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
             </div>
           </div>
-        </div>
+        </div></div>
       </div>
     </div>
   )

@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getMeetEventEntries:   (meetEventId)    => ipcRenderer.invoke('meetEvents:getWithEntries', meetEventId),
   addEntry:              (data)           => ipcRenderer.invoke('entries:add', data),
   removeEntry:           (id)             => ipcRenderer.invoke('entries:remove', id),
+  getAthleteBestMark:    (aid, evId)      => ipcRenderer.invoke('entries:getAthleteBestMark', aid, evId),
   updateEntrySeed:       (id, mark)       => ipcRenderer.invoke('entries:updateSeed', id, mark),
   scratchEntry:          (id, scratched)  => ipcRenderer.invoke('entries:scratch', id, scratched),
   saveResult:            (entryId, data)  => ipcRenderer.invoke('results:save', entryId, data),

@@ -11,8 +11,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "electron": "electron .",
-    "predist": "node -e \"const fs=require('fs');try{fs.readdirSync('release').filter(f=>/\\.(exe|blockmap)$/.test(f)).forEach(f=>{try{fs.unlinkSync('release/'+f)}catch(e){}});}catch(e){}\"",
+    "predist": "node -e \"const fs=require('fs'),p=require('path');try{const r='release';if(fs.existsSync(r)){fs.readdirSync(r).filter(f=>/\\.(exe|blockmap)$/.test(f)).forEach(f=>{try{fs.unlinkSync(p.join(r,f))}catch(e){}});const wu=p.join(r,'win-unpacked');if(fs.existsSync(wu))fs.rmSync(wu,{recursive:true,force:true});}}catch(e){}\"",
     "dist": "vite build && electron-builder --win --x64",
+    "postdist": "node -e \"const fs=require('fs'),p=require('path');const wu=p.join('release','win-unpacked');try{if(fs.existsSync(wu))fs.rmSync(wu,{recursive:true,force:true})}catch(e){}\"",
     "dist:dir": "vite build && electron-builder --win --dir",
     "postinstall": "node scripts/install-bsql-electron.cjs"
   },
