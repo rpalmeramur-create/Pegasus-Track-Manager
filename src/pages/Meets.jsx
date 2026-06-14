@@ -246,7 +246,9 @@ const FALLBACK = {
     _persistTemplates(_loadTemplates().filter(t => t.id !== id))
     return Promise.resolve({ success: true })
   },
-  importTCLMeet: () => Promise.resolve({ error: 'TCL meet import requires the desktop app.' }),
+  importTCLMeet:          () => Promise.resolve({ error: 'TCL meet import requires the desktop app.' }),
+  importFinishLynx:       () => Promise.resolve({ error: 'FinishLynx import requires the desktop app.' }),
+  applyFinishLynxResults: () => Promise.resolve({ success: false, error: 'Not available in browser.' }),
 }
 
 // ─── API shim — reads window.electronAPI lazily so Electron's
@@ -267,7 +269,7 @@ function printSheetHtml(containerRef) {
   }).filter(t => {
     const s = t.trimStart()
     if (s.startsWith('@media') || s.startsWith('@font-face')) return false
-    return s.includes('.ps-') || s.includes('.print-sheet') || s.includes('.pbreak')
+    return s.includes('.ps-') || s.includes('.hs-') || s.includes('.print-sheet') || s.includes('.pbreak')
   }).join('\n')
 
   const html = containerRef.current?.innerHTML ?? ''
@@ -288,7 +290,7 @@ function savePdfHtml(containerRef, meetName, type) {
   }).filter(t => {
     const s = t.trimStart()
     if (s.startsWith('@media') || s.startsWith('@font-face')) return false
-    return s.includes('.ps-') || s.includes('.print-sheet') || s.includes('.pbreak')
+    return s.includes('.ps-') || s.includes('.hs-') || s.includes('.print-sheet') || s.includes('.pbreak')
   }).join('\n')
 
   const html = containerRef.current?.innerHTML ?? ''
@@ -1798,6 +1800,7 @@ function ResultsTab({ meet, meetDetail, onScoringChange }) {
   const [scoringEventId,       setScoringEventId]       = useState(null)
   const [scoringAll,           setScoringAll]           = useState(false)
   const [showAdvance,          setShowAdvance]          = useState(null)
+  const [showFinishLynx,       setShowFinishLynx]       = useState(false)
 
   const load = useCallback(() => {
     if (meetDetail.events.length === 0) { setEventsData([]); return }
@@ -1896,6 +1899,10 @@ function ResultsTab({ meet, meetDetail, onScoringChange }) {
           onClick={handleFullBoatLabels} disabled={scoringAll}>
           {scoringAll ? '⏳ Scoring…' : '🏷 Award Labels'}
         </button>
+        <button className="btn btn-ghost" style={{ fontSize: 12 }}
+          onClick={() => setShowFinishLynx(true)}>
+          ⬆ FinishLynx Import
+        </button>
         <button className="btn btn-primary" style={{ fontSize: 12 }}
           onClick={() => setShowPrintMeet(true)}>
           🖨 Print Full Meet Results
@@ -1934,6 +1941,14 @@ function ResultsTab({ meet, meetDetail, onScoringChange }) {
         />
       )}
 
+      {showFinishLynx && (
+        <ImportFinishLynxModal
+          meet={meet}
+          onImported={() => { load(); setShowFinishLynx(false) }}
+          onClose={() => setShowFinishLynx(false)}
+        />
+      )}
+
       {showAwardLabels && (
         <PrintAwardLabelsModal
           meet={meet}
@@ -1968,6 +1983,144 @@ function ResultsTab({ meet, meetDetail, onScoringChange }) {
         />
       )}
     </div>
+  )
+}
+
+// ─── FinishLynx Import Modal ─────────────────────────────
+function ImportFinishLynxModal({ meet, onImported, onClose }) {
+  const [state,     setState]     = useState('loading') // 'loading'|'preview'|'applying'|'error'
+  const [parsed,    setParsed]    = useState(null)      // { matched, unmatched, total }
+  const [errorMsg,  setErrorMsg]  = useState('')
+  const [applyDone, setApplyDone] = useState(null)      // { updated, inserted, count }
+
+  useEffect(() => {
+    api.importFinishLynx(meet.id).then(res => {
+      if (res?.canceled)       { onClose(); return }
+      if (res?.error)          { setErrorMsg(res.error); setState('error'); return }
+      if (!res?.matched)       { setErrorMsg('No results found in file.'); setState('error'); return }
+      setParsed(res)
+      setState('preview')
+    }).catch(e => { setErrorMsg(e?.message ?? 'Unknown error'); setState('error') })
+  }, []) // eslint-disable-line
+
+  const handleApply = async () => {
+    setState('applying')
+    try {
+      const res = await api.applyFinishLynxResults(parsed.matched)
+      if (res?.error) { setErrorMsg(res.error); setState('error'); return }
+      setApplyDone(res)
+      setState('done')
+    } catch (e) { setErrorMsg(e?.message ?? 'Unknown error'); setState('error') }
+  }
+
+  const overlay = (children) => (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal-box" style={{ maxWidth: 600, width: '90vw', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+        {children}
+      </div>
+    </div>
+  )
+
+  if (state === 'loading') return overlay(
+    <div style={{ padding: 40, textAlign: 'center' }}>
+      <div className="loading-spinner" style={{ margin: '0 auto 16px' }} />
+      <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>Opening file…</div>
+    </div>
+  )
+
+  if (state === 'error') return overlay(
+    <>
+      <div className="modal-header"><h3 style={{ margin: 0 }}>Import Failed</h3></div>
+      <div style={{ padding: '16px 20px', color: 'var(--red)', fontSize: 13 }}>{errorMsg}</div>
+      <div className="modal-footer" style={{ justifyContent: 'flex-end' }}>
+        <button className="btn btn-ghost" onClick={onClose}>Close</button>
+      </div>
+    </>
+  )
+
+  if (state === 'done') return overlay(
+    <>
+      <div className="modal-header"><h3 style={{ margin: 0 }}>Import Complete</h3></div>
+      <div style={{ padding: '16px 20px', fontSize: 13 }}>
+        <span style={{ color: 'var(--green)' }}>✓</span> Saved <strong>{applyDone?.count ?? 0}</strong> result{applyDone?.count !== 1 ? 's' : ''}.
+        {applyDone?.updated > 0 && ` (${applyDone.updated} updated, ${applyDone.inserted} new)`}
+      </div>
+      <div className="modal-footer" style={{ justifyContent: 'flex-end' }}>
+        <button className="btn btn-primary" onClick={onImported}>Done</button>
+      </div>
+    </>
+  )
+
+  const { matched, unmatched, total } = parsed
+
+  return overlay(
+    <>
+      <div className="modal-header">
+        <h3 style={{ margin: 0 }}>FinishLynx Import — {meet.name}</h3>
+      </div>
+
+      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 20px' }}>
+        {/* Matched */}
+        <div style={{ marginBottom: 12, fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+          Matched — {matched.length} of {total} athletes
+        </div>
+        {matched.length === 0
+          ? <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>No athletes matched to roster entries.</div>
+          : (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 16 }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                  <th style={{ textAlign: 'left', padding: '4px 8px', color: 'var(--text-muted)', fontWeight: 600 }}>Athlete</th>
+                  <th style={{ textAlign: 'center', padding: '4px 8px', color: 'var(--text-muted)', fontWeight: 600 }}>Place</th>
+                  <th style={{ textAlign: 'center', padding: '4px 8px', color: 'var(--text-muted)', fontWeight: 600 }}>Mark</th>
+                  <th style={{ textAlign: 'center', padding: '4px 8px', color: 'var(--text-muted)', fontWeight: 600 }}>Wind</th>
+                </tr>
+              </thead>
+              <tbody>
+                {matched.map((r, i) => {
+                  const status = r.dns ? 'DNS' : r.dnf ? 'DNF' : r.dq ? 'DQ' : null
+                  return (
+                    <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
+                      <td style={{ padding: '5px 8px' }}>{r.last_name}, {r.first_name}</td>
+                      <td style={{ padding: '5px 8px', textAlign: 'center' }}>{status || r.place || '—'}</td>
+                      <td style={{ padding: '5px 8px', textAlign: 'center', fontFamily: 'monospace' }}>{status || r.mark || '—'}</td>
+                      <td style={{ padding: '5px 8px', textAlign: 'center', color: 'var(--text-muted)' }}>{r.wind || '—'}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )
+        }
+
+        {/* Unmatched */}
+        {unmatched.length > 0 && (
+          <>
+            <div style={{ marginBottom: 8, fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              Not matched — {unmatched.length} athlete{unmatched.length !== 1 ? 's' : ''}
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>
+              These names from the .lif file weren't found in this meet's entries:
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {unmatched.map((u, i) => (
+                <span key={i} style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 4, padding: '2px 8px', fontSize: 11 }}>
+                  {u.lastName}, {u.firstName} {u.mark ? `(${u.mark})` : ''}
+                </span>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="modal-footer" style={{ justifyContent: 'space-between' }}>
+        <button className="btn btn-ghost" onClick={onClose} disabled={state === 'applying'}>Cancel</button>
+        <button className="btn btn-primary" onClick={handleApply}
+          disabled={matched.length === 0 || state === 'applying'}>
+          {state === 'applying' ? 'Saving…' : `Import ${matched.length} result${matched.length !== 1 ? 's' : ''}`}
+        </button>
+      </div>
+    </>
   )
 }
 

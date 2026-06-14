@@ -113,6 +113,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Hy-Tek MDB (Access database) meet import
   importHytek: (filePath) => ipcRenderer.invoke('import:hytek', filePath),
 
+  // FinishLynx .lif results import
+  importFinishLynx:       (meetId) => ipcRenderer.invoke('import:finishlynx',        meetId),
+  applyFinishLynxResults: (rows)   => ipcRenderer.invoke('import:finishlynx:apply',  rows),
+
   // Auth
   authGetSession:    ()       => ipcRenderer.invoke('auth:getSession'),
   authLogin:         (data)   => ipcRenderer.invoke('auth:login',         data),

@@ -31,6 +31,46 @@ function parseMark(str, category) {
   return parseFloat(s) || null
 }
 
+function parseLif(content) {
+  const rows = []
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (!line || line.startsWith(';') || line.startsWith('#')) continue
+
+    const parts = line.split(',').map(p => p.trim().replace(/^"|"$/g, ''))
+    if (parts.length < 7) continue
+
+    // LIF: EventHeat, Place, Lane, LastName, FirstName, Affil, Seed, Final, Wind, ...
+    const [evtHeat, place, lane, lastName, firstName, affiliation,, final, wind] = parts
+    if (!lastName && !firstName) continue
+
+    const evtStr  = (evtHeat || '').trim()
+    const heatNum = evtStr.length >= 3 ? (parseInt(evtStr.slice(-2), 10) || 0) : 0
+    const evtNum  = evtStr.length >= 3 ? (parseInt(evtStr.slice(0, -2), 10) || 0) : 0
+
+    const finalMark = (final || '').trim()
+    const dns = !finalMark || finalMark.toUpperCase() === 'DNS'
+    const dnf = finalMark.toUpperCase() === 'DNF'
+    const dq  = finalMark.toUpperCase() === 'DQ'
+
+    rows.push({
+      evtNum,
+      heatNum,
+      lane:        parseInt(lane,  10) || null,
+      place:       parseInt(place, 10) || null,
+      lastName:    (lastName    || '').trim(),
+      firstName:   (firstName   || '').trim(),
+      affiliation: (affiliation || '').trim(),
+      mark:        (dns || dnf || dq) ? null : (finalMark || null),
+      wind:        (wind || '').trim() || null,
+      dns: dns ? 1 : 0,
+      dnf: dnf ? 1 : 0,
+      dq:  dq  ? 1 : 0,
+    })
+  }
+  return rows
+}
+
 function bestAttempt(attemptsJson, category) {
   if (!attemptsJson) return null
   let arr
@@ -2037,6 +2077,117 @@ function registerImportHandlers() {
       console.error('[Hy-Tek import] error:', err)
       return { error: err.message }
     }
+  })
+
+  // ── FinishLynx .lif results import ──
+  ipcMain.handle('import:finishlynx', async (_, meetId) => {
+    const { filePath, canceled } = await dialog.showOpenDialog({
+      title: 'Import FinishLynx Results',
+      filters: [
+        { name: 'FinishLynx LIF', extensions: ['lif', 'txt', 'LIF'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+      properties: ['openFile'],
+    })
+    if (canceled || !filePath) return { canceled: true }
+
+    let content
+    try { content = fs.readFileSync(filePath, 'latin1') }
+    catch (e) { return { error: `Cannot read file: ${e.message}` } }
+
+    const parsed = parseLif(content)
+    if (parsed.length === 0) return { error: 'No valid data rows found. Make sure this is a FinishLynx LIF export.' }
+
+    const meetEntries = db.prepare(`
+      SELECT e.id AS entry_id, e.heat, e.lane,
+        a.first_name, a.last_name
+      FROM entries e
+      JOIN athletes a   ON e.athlete_id    = a.id
+      JOIN meet_events me ON e.meet_event_id = me.id
+      WHERE me.meet_id = ? AND e.scratched = 0
+    `).all(meetId)
+
+    const matched   = []
+    const unmatched = []
+
+    for (const row of parsed) {
+      if (!row.lastName && !row.firstName) continue
+
+      const lLast  = row.lastName.toLowerCase()
+      const lFirst = row.firstName.toLowerCase()
+
+      const nameMatches = meetEntries.filter(e =>
+        e.last_name.toLowerCase()  === lLast &&
+        e.first_name.toLowerCase() === lFirst
+      )
+
+      let entry = null
+      if (nameMatches.length === 1) {
+        entry = nameMatches[0]
+      } else if (nameMatches.length > 1) {
+        // Narrow by heat+lane when name appears multiple times
+        entry = nameMatches.find(e => e.heat === row.heatNum && e.lane === row.lane)
+              ?? nameMatches[0]
+      }
+
+      if (entry) {
+        matched.push({
+          entry_id:  entry.entry_id,
+          last_name: entry.last_name,
+          first_name: entry.first_name,
+          place: row.place,
+          mark:  row.mark,
+          wind:  row.wind,
+          dns:   row.dns,
+          dnf:   row.dnf,
+          dq:    row.dq,
+        })
+      } else {
+        unmatched.push({
+          lastName:  row.lastName,
+          firstName: row.firstName,
+          mark: row.mark || (row.dns ? 'DNS' : row.dnf ? 'DNF' : row.dq ? 'DQ' : null),
+        })
+      }
+    }
+
+    return { matched, unmatched, total: parsed.length }
+  })
+
+  ipcMain.handle('import:finishlynx:apply', (_, rows) => {
+    if (!rows?.length) return { success: true, updated: 0, inserted: 0, count: 0 }
+
+    const entryIds  = rows.map(r => r.entry_id)
+    const existing  = db.prepare(
+      `SELECT id, entry_id FROM results WHERE entry_id IN (${entryIds.map(() => '?').join(',')})`
+    ).all(...entryIds)
+    const byEntry = Object.fromEntries(existing.map(r => [r.entry_id, r.id]))
+
+    const upd = db.prepare(`
+      UPDATE results
+      SET place=@place, mark=@mark, wind=@wind,
+          did_not_start=@dns, did_not_finish=@dnf, disqualified=@dq
+      WHERE id=@id
+    `)
+    const ins = db.prepare(`
+      INSERT INTO results (entry_id, place, mark, wind, did_not_start, did_not_finish, disqualified)
+      VALUES (@entry_id, @place, @mark, @wind, @dns, @dnf, @dq)
+    `)
+
+    let updated = 0, inserted = 0
+    db.transaction(() => {
+      for (const r of rows) {
+        const p = {
+          place: r.place ?? null, mark: r.mark ?? null, wind: r.wind ?? null,
+          dns: r.dns ?? 0, dnf: r.dnf ?? 0, dq: r.dq ?? 0,
+        }
+        const existId = byEntry[r.entry_id]
+        if (existId) { upd.run({ ...p, id: existId }); updated++ }
+        else         { ins.run({ ...p, entry_id: r.entry_id }); inserted++ }
+      }
+    })()
+
+    return { success: true, updated, inserted, count: rows.length }
   })
 }
 
