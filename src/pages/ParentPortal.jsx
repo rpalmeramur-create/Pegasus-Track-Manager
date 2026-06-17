@@ -3,8 +3,7 @@ import { LogOut, Calendar, Trophy, MapPin, Clock, ChevronDown, ChevronRight, Sta
 import AppLogo from '../components/AppLogo.jsx'
 import { useAuth } from '../AuthContext.jsx'
 import { useSettings } from '../SettingsContext.jsx'
-
-const api = window.electronAPI
+import { getMeetResults, getUpcomingSchedule } from '../lib/portalApi.js'
 
 function ordinal(n) {
   if (!n) return '—'
@@ -326,13 +325,12 @@ export default function ParentPortal() {
   const [resultsLoading, setResultsLoading] = useState(true)
 
   useEffect(() => {
-    if (!api) return
-    api.getUpcomingSchedule()
+    getUpcomingSchedule()
       .then(setSchedule)
       .catch(() => setSchedule([]))
       .finally(() => setScheduleLoading(false))
 
-    api.getMeetResults()
+    getMeetResults()
       .then(setResults)
       .catch(() => setResults([]))
       .finally(() => setResultsLoading(false))

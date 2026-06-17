@@ -2210,7 +2210,7 @@ function PrintHeatSheetModal({ meet, meetDetail, onClose }) {
     const heatWord = isField ? 'Flight' : 'Heat'
     // cols after the fixed lane column
     const extraCols = (showBib ? 1 : 0) + 1 + (showTeam ? 1 : 0) + (showSeed ? 1 : 0)
-      + (isField ? 7 : showWind ? 3 : 2)
+      + (isField ? 7 : 2)
     return (
       <div key={heat} style={{ marginBottom: 18 }}>
         <div className="hs-heat-label">{heatWord} {heat} of {totalHeats}</div>
@@ -2232,7 +2232,6 @@ function PrintHeatSheetModal({ meet, meetDetail, onClose }) {
               ) : (
                 <>
                   <th style={{ width: 68 }}>Time</th>
-                  {showWind && <th style={{ width: 44 }}>Wind</th>}
                   <th style={{ width: 28 }}>Pl</th>
                 </>
               )}
@@ -2251,7 +2250,7 @@ function PrintHeatSheetModal({ meet, meetDetail, onClose }) {
                     {showSeed && <td className="ps-td-center">{en.seed_mark || '—'}</td>}
                     {isField
                       ? [0,1,2,3,4,5,6].map(n => <td key={n} className="hs-write-in" />)
-                      : <><td className="hs-write-in" />{showWind && <td className="hs-write-in" />}<td className="hs-write-in" /></>
+                      : <><td className="hs-write-in" /><td className="hs-write-in" /></>
                     }
                   </tr>
                   {legs.length > 0 && (
