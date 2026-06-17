@@ -5,6 +5,27 @@ const key = import.meta.env.VITE_SUPABASE_ANON_KEY
 
 const sb = (url && key) ? createClient(url, key) : null
 
+// ─── Web auth (Supabase email/password) ──────────────────────
+export async function webGetSession() {
+  if (!sb) return null
+  const { data } = await sb.auth.getSession()
+  if (!data?.session) return null
+  const email = data.session.user.email ?? ''
+  return { role: 'parent', display_name: email.split('@')[0], email }
+}
+
+export async function webLogin(email, password) {
+  if (!sb) return { error: 'Supabase is not configured on this deployment.' }
+  const { data, error } = await sb.auth.signInWithPassword({ email, password })
+  if (error) return { error: error.message }
+  const userEmail = data.user?.email ?? email
+  return { role: 'parent', display_name: userEmail.split('@')[0], email: userEmail }
+}
+
+export async function webLogout() {
+  if (sb) await sb.auth.signOut()
+}
+
 export async function getMeetResults() {
   if (window.electronAPI) return window.electronAPI.getMeetResults()
   if (!sb) return []

@@ -1,28 +1,48 @@
 import React, { createContext, useContext, useEffect, useState } from 'react'
+import { webGetSession, webLogin, webLogout } from './lib/portalApi.js'
 
 const AuthCtx = createContext({ user: null, login: async () => {}, logout: async () => {} })
+
+const isElectron = () => !!window.electronAPI?.authGetSession
 
 export function AuthProvider({ children }) {
   const [user, setUser]       = useState(undefined) // undefined = loading
   const [checked, setChecked] = useState(false)
 
   useEffect(() => {
-    if (!window.electronAPI?.authGetSession) { setChecked(true); return }
-    window.electronAPI.authGetSession()
-      .then(s => { setUser(s || null) })
-      .catch(() => { setUser(null) })
-      .finally(() => setChecked(true))
+    if (isElectron()) {
+      window.electronAPI.authGetSession()
+        .then(s => setUser(s || null))
+        .catch(() => setUser(null))
+        .finally(() => setChecked(true))
+    } else {
+      webGetSession()
+        .then(s => setUser(s))
+        .catch(() => setUser(null))
+        .finally(() => setChecked(true))
+    }
   }, [])
 
-  const login = async ({ username, password }) => {
-    const res = await window.electronAPI.authLogin({ username, password })
-    if (res?.error) return res
-    setUser(res)
-    return res
+  const login = async (credentials) => {
+    if (isElectron()) {
+      const res = await window.electronAPI.authLogin({ username: credentials.username, password: credentials.password })
+      if (res?.error) return res
+      setUser(res)
+      return res
+    } else {
+      const res = await webLogin(credentials.email, credentials.password)
+      if (res?.error) return res
+      setUser(res)
+      return res
+    }
   }
 
   const logout = async () => {
-    await window.electronAPI?.authLogout?.()
+    if (isElectron()) {
+      await window.electronAPI.authLogout?.()
+    } else {
+      await webLogout()
+    }
     setUser(null)
   }
 
