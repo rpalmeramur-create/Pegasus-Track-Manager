@@ -5,21 +5,18 @@ import { useAuth } from '../AuthContext.jsx'
 import { useSettings } from '../SettingsContext.jsx'
 
 export default function Login() {
-  const { login } = useAuth()
+  const { login, setUser } = useAuth()
   const { homeTeam } = useSettings()
-  const isWeb = !window.electronAPI
 
   const [accounts, setAccounts] = useState([])
   const [role, setRole]         = useState(null)    // 'admin' | 'parent'
   const [selected, setSelected] = useState(null)    // account object
-  const [email, setEmail]       = useState('')
   const [password, setPassword] = useState('')
   const [showPw, setShowPw]     = useState(false)
   const [error, setError]       = useState('')
   const [loading, setLoading]   = useState(false)
 
   useEffect(() => {
-    if (isWeb) return
     window.electronAPI?.authListUsers?.()
       .then(u => setAccounts((u ?? []).filter(a => a.active)))
       .catch(() => {})
@@ -52,14 +49,20 @@ export default function Login() {
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!password) { setError('Enter your password.'); return }
-    if (isWeb && !email) { setError('Enter your email.'); return }
     setLoading(true)
     setError('')
-    const res = isWeb
-      ? await login({ email, password })
-      : await login({ username: selected.username, password })
+    const res = await login({ username: selected.username, password })
     setLoading(false)
     if (res?.error) setError(res.error)
+  }
+
+  const handlePasscode = (e) => {
+    e.preventDefault()
+    if (password === 'Groundlift#01') {
+      setUser({ role: 'parent', display_name: 'Parent' })
+    } else {
+      setError('Incorrect passcode.')
+    }
   }
 
   return (
@@ -92,42 +95,8 @@ export default function Login() {
 
         <div className="card" style={{ padding: 28 }}>
 
-          {/* ── Web: simple email + password (Supabase auth) ── */}
-          {isWeb && (
-            <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 2 }}>
-                Parent Portal Sign In
-              </div>
-              <div className="form-group" style={{ margin: 0 }}>
-                <label className="form-label">Email</label>
-                <input className="input" type="email" autoFocus autoComplete="email"
-                  value={email} onChange={e => setEmail(e.target.value)}
-                  placeholder="your@email.com" />
-              </div>
-              <div className="form-group" style={{ margin: 0 }}>
-                <label className="form-label">Password</label>
-                <div style={{ position: 'relative' }}>
-                  <input className="input" type={showPw ? 'text' : 'password'}
-                    autoComplete="current-password"
-                    value={password} onChange={e => setPassword(e.target.value)}
-                    placeholder="Enter password" style={{ paddingRight: 40 }} />
-                  <button type="button" className="btn btn-ghost btn-icon"
-                    style={{ position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)', padding: 4 }}
-                    onClick={() => setShowPw(v => !v)}>
-                    {showPw ? <EyeOff size={14} /> : <Eye size={14} />}
-                  </button>
-                </div>
-              </div>
-              {error && <div style={errorStyle}>{error}</div>}
-              <button type="submit" className="btn btn-primary"
-                style={{ width: '100%', justifyContent: 'center' }} disabled={loading}>
-                {loading ? 'Signing in…' : 'Sign In'}
-              </button>
-            </form>
-          )}
-
           {/* ── Step 1: choose role ── */}
-          {!isWeb && !role && (
+          {!role && (
             <>
               <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 16 }}>
                 Sign in as
@@ -163,7 +132,7 @@ export default function Login() {
           )}
 
           {/* ── Step 2a: pick account (multiple accounts for role) ── */}
-          {!isWeb && role && !selected && (
+          {role && !selected && (
             <>
               <BackHeader onBack={handleBack}
                 title={role === 'admin' ? 'Coach Access' : 'Parent Portal'}
@@ -180,17 +149,38 @@ export default function Login() {
                   </button>
                 ))}
                 {(role === 'admin' ? adminAccounts : parentAccounts).length === 0 && (
-                  <div style={{ textAlign: 'center', padding: '20px 0', color: 'var(--text-muted)', fontSize: 13 }}>
-                    No {role === 'parent' ? 'parent' : 'coach'} accounts set up yet.
-                    {role === 'parent' && <div style={{ marginTop: 6, fontSize: 12 }}>Ask the head coach to create a parent account in Settings.</div>}
-                  </div>
+                  role === 'parent' ? (
+                    <form onSubmit={handlePasscode} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      <div style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'center' }}>
+                        Enter the parent portal passcode
+                      </div>
+                      <div style={{ position: 'relative' }}>
+                        <input className="input" type={showPw ? 'text' : 'password'} autoFocus
+                          value={password} onChange={e => { setPassword(e.target.value); setError('') }}
+                          placeholder="Passcode" style={{ paddingRight: 40 }} />
+                        <button type="button" className="btn btn-ghost btn-icon"
+                          style={{ position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)', padding: 4 }}
+                          onClick={() => setShowPw(v => !v)}>
+                          {showPw ? <EyeOff size={14} /> : <Eye size={14} />}
+                        </button>
+                      </div>
+                      {error && <div style={errorStyle}>{error}</div>}
+                      <button type="submit" className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }}>
+                        Enter Portal
+                      </button>
+                    </form>
+                  ) : (
+                    <div style={{ textAlign: 'center', padding: '20px 0', color: 'var(--text-muted)', fontSize: 13 }}>
+                      No coach accounts set up yet.
+                    </div>
+                  )
                 )}
               </div>
             </>
           )}
 
           {/* ── Step 2b: password ── */}
-          {!isWeb && role && selected && (
+          {role && selected && (
             <>
               <BackHeader onBack={handleBack}
                 title={selected.display_name || selected.username}
@@ -221,7 +211,7 @@ export default function Login() {
 
         </div>
 
-        {!isWeb && !role && (
+        {!role && (
           <div style={{ textAlign: 'center', marginTop: 14, fontSize: 11, color: 'var(--text-muted)' }}>
             Default: <strong>admin</strong> / <strong>coach</strong>
           </div>
