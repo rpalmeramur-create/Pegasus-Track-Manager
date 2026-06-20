@@ -2562,10 +2562,12 @@ function PrintHeatSheetModal({ meet, meetDetail, onClose }) {
     return { heats, unseeded }
   }
 
+  const toProper = s => (s || '').replace(/\S+/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+
   const fmtName = (last, first) =>
     nameCase === 'upper'
       ? `${(last || '').toUpperCase()}, ${(first || '').toUpperCase()}`
-      : `${last || ''}, ${first || ''}`
+      : `${toProper(last)}, ${toProper(first)}`
 
   const activeEvents = eventsData.filter(ev => (ev.entries ?? []).some(en => !en.scratched))
   const effectiveIds = selectedIds ?? new Set(activeEvents.map(ev => ev.id))

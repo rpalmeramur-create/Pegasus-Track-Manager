@@ -2259,6 +2259,7 @@ body { margin: 0; padding: 0; }
   // ── Print letter-size sheet (heat sheets / results) ──
   ipcMain.handle('print:sheet', async (_, { html, css }) => {
     const os = require('os')
+    const { spawn } = require('child_process')
     const { readSettings } = require('./settings')
     const sheetPrinter = readSettings().sheetPrinter || ''
 
@@ -2272,49 +2273,49 @@ body  { margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; }
     const tmpHtml = path.join(os.tmpdir(), `pegasus-sheet-${Date.now()}.html`)
     fs.writeFileSync(tmpHtml, fullHtml, 'utf8')
 
-    // Use a very tall window so multi-page content fully renders
     const printWin = new BrowserWindow({
       show: false,
       width: 816,
-      height: 30000,
+      height: 1100,
       webPreferences: { nodeIntegration: false, contextIsolation: true },
     })
-    await printWin.loadURL(`file:///${tmpHtml.replace(/\\/g, '/')}`)
-    // Brief pause to allow full layout
-    await new Promise(r => setTimeout(r, 200))
 
-    // If a specific printer is configured, print directly to it
-    if (sheetPrinter) {
-      return new Promise(resolve => {
-        const opts = {
-          silent: true,
-          printBackground: true,
-          pageSize: { width: 215900, height: 279400 },
-          margins: { marginType: 'none' },
-          deviceName: sheetPrinter,
-        }
-        printWin.webContents.print(opts, (success, reason) => {
-          printWin.close()
-          try { fs.unlinkSync(tmpHtml) } catch {}
-          resolve({ success, reason: reason ?? null })
-        })
-      })
-    }
-
-    // No printer configured: generate a PDF and open it in the system viewer
     try {
+      await printWin.loadURL(`file:///${tmpHtml.replace(/\\/g, '/')}`)
+      // Allow CSS layout to settle after DOM load
+      await new Promise(r => setTimeout(r, 400))
+
+      // Generate PDF — works reliably on hidden windows unlike webContents.print()
       const pdfData = await printWin.webContents.printToPDF({
         printBackground: true,
         preferCSSPageSize: true,
+        pageSize: 'Letter',
       })
       printWin.close()
       try { fs.unlinkSync(tmpHtml) } catch {}
-      const tmpPdf = path.join(os.tmpdir(), `pegasus-results-${Date.now()}.pdf`)
+
+      const tmpPdf = path.join(os.tmpdir(), `pegasus-sheet-${Date.now()}.pdf`)
       fs.writeFileSync(tmpPdf, pdfData)
+
+      if (sheetPrinter) {
+        // Send PDF to the configured printer via Windows PrintTo verb.
+        // Uses the system default PDF viewer (Edge on Win11) for silent printing.
+        const safe = (s) => s.replace(/'/g, "''")
+        const ps = spawn('powershell.exe', [
+          '-NonInteractive', '-WindowStyle', 'Hidden', '-Command',
+          `Start-Process -FilePath '${safe(tmpPdf)}' -Verb PrintTo -ArgumentList '${safe(sheetPrinter)}'`,
+        ])
+        ps.once('error', () => {}) // ignore spawn errors — fire-and-forget
+        // Give the PDF viewer 30 s to start spooling before we delete the temp file
+        setTimeout(() => { try { fs.unlinkSync(tmpPdf) } catch {} }, 30000)
+        return { success: true, reason: null }
+      }
+
+      // No printer configured: open the PDF in the system viewer
       const openErr = await shell.openPath(tmpPdf)
       return { success: !openErr, reason: openErr || null }
     } catch (e) {
-      printWin.close()
+      if (!printWin.isDestroyed()) printWin.close()
       try { fs.unlinkSync(tmpHtml) } catch {}
       return { success: false, reason: e.message }
     }

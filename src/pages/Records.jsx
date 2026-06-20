@@ -213,11 +213,13 @@ export default function Records() {
   const [filterCat,    setFilterCat]    = useState('all')
   const [filterGender, setFilterGender] = useState('all')
   const [filterAge,    setFilterAge]    = useState('')
-  const [showModal, setShowModal]   = useState(false)
-  const [editRec,   setEditRec]     = useState(null)
-  const [syncing,   setSyncing]     = useState(false)
-  const [syncMsg,   setSyncMsg]     = useState(null)
-  const [homeTeam,  setHomeTeam]    = useState('Pegasus Track')
+  const [showModal,     setShowModal]     = useState(false)
+  const [editRec,       setEditRec]       = useState(null)
+  const [syncing,       setSyncing]       = useState(false)
+  const [syncMsg,       setSyncMsg]       = useState(null)
+  const [homeTeam,      setHomeTeam]      = useState('Pegasus Track')
+  const [showWind,      setShowWind]      = useState(false)
+  const [expandedEvents, setExpandedEvents] = useState(new Set())
 
   const load = useCallback(async (autoSync = false) => {
     setLoading(true)
@@ -228,6 +230,7 @@ export default function Records() {
     ])
     setTfEvents(evts ?? [])
     setHomeTeam(settings?.homeTeam || 'Pegasus Track')
+    setShowWind(!!settings?.showWindInRecords)
     // Auto-sync from results if the table is empty
     if ((recs ?? []).length === 0 && autoSync) {
       try {
@@ -241,7 +244,7 @@ export default function Records() {
     setLoading(false)
   }, [scope])
 
-  useEffect(() => { load(true) }, [load])
+  useEffect(() => { load(true); setExpandedEvents(new Set()) }, [load])
 
   const handleSync = async () => {
     setSyncing(true)
@@ -291,8 +294,6 @@ export default function Records() {
         })
     return byCat
   }, [filtered])
-
-  const showWind = (cat) => cat === 'track' || cat === 'relay'
 
   return (
     <div className="records-page">
@@ -380,22 +381,31 @@ export default function Records() {
 
             {Object.entries(grouped[cat])
               .sort(([a], [b]) => a.localeCompare(b))
-              .map(([evName, recs]) => (
+              .map(([evName, recs]) => {
+                const isOpen = expandedEvents.has(evName)
+                const toggle = () => setExpandedEvents(prev => {
+                  const next = new Set(prev)
+                  isOpen ? next.delete(evName) : next.add(evName)
+                  return next
+                })
+                return (
                 <div key={evName} className="records-event-group">
-                  <div className="records-event-heading">
-                    <ChevronRight size={12} className="records-chevron" />
+                  <div className="records-event-heading" onClick={toggle}
+                    style={{ cursor: 'pointer', userSelect: 'none' }}>
+                    <ChevronRight size={12} className="records-chevron"
+                      style={{ transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }} />
                     {evName}
                     <span className="records-count">{recs.length} record{recs.length !== 1 ? 's' : ''}</span>
                   </div>
 
-                  <div className="records-table-wrap">
+                  {isOpen && <div className="records-table-wrap">
                     <table className="records-table">
                       <thead>
                         <tr>
                           <th>Gender</th>
                           <th>Age Group</th>
                           <th>Mark</th>
-                          {showWind(cat) && <th>Wind</th>}
+                          {showWind && (cat === 'track' || cat === 'relay') && <th>Wind</th>}
                           <th>Athlete</th>
                           {scope === 'open' && <th>Team</th>}
                           <th>Meet</th>
@@ -413,7 +423,7 @@ export default function Records() {
                             </td>
                             <td className="rec-age">{rec.age_group || <span className="muted-val">Open</span>}</td>
                             <td className="rec-mark-cell">{rec.mark}</td>
-                            {showWind(cat) && (
+                            {showWind && (cat === 'track' || cat === 'relay') && (
                               <td className="rec-wind-cell">
                                 {windLabel(rec.wind)
                                   ? <span className={parseFloat(rec.wind) > 2 ? 'rec-wind-illegal' : 'rec-wind-val'}>{windLabel(rec.wind)}</span>
@@ -444,9 +454,10 @@ export default function Records() {
                         ))}
                       </tbody>
                     </table>
-                  </div>
+                  </div>}
                 </div>
-              ))}
+                )
+              })}
           </div>
         ))
       )}

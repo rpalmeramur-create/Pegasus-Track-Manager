@@ -748,7 +748,8 @@ export default function Settings() {
   const [hasClaudeKey, setHasClaudeKey] = useState(false)
   const [printers, setPrinters]         = useState([])
   const [printerSaved, setPrinterSaved] = useState(false)
-  const [autoPrint,  setAutoPrintState] = useState(() => getAutoPrint())
+  const [autoPrint,  setAutoPrintState]   = useState(() => getAutoPrint())
+  const [showWindInRecords, setShowWindInRecords] = useState(false)
   const [loading, setLoading]           = useState(true)
 
   useEffect(() => {
@@ -767,6 +768,7 @@ export default function Settings() {
         homeTeam:             s.homeTeam             || 'Pegasus Track',
         attendanceThreshold:  s.attendanceThreshold  ?? 3,
       }))
+      setShowWindInRecords(!!s.showWindInRecords)
       setHasClaudeKey(!!s.hasClaudeKey)
       setPrinters(p)
       if (s.connected) setConnStatus('ok')
@@ -956,6 +958,23 @@ export default function Settings() {
                 <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', marginBottom: 2 }}>Direct Print</div>
                 <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                   Skip the print preview and send directly to the configured printer (or PDF if none is set).
+                </div>
+              </div>
+            </div>
+
+            <div className="settings-toggle-row">
+              <label className="toggle-switch">
+                <input type="checkbox" checked={showWindInRecords}
+                  onChange={e => {
+                    setShowWindInRecords(e.target.checked)
+                    window.electronAPI?.saveSettings({ showWindInRecords: e.target.checked })
+                  }} />
+                <span className="toggle-track" />
+              </label>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', marginBottom: 2 }}>Show Wind in Records</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  Display the wind reading column in the Records tab for track and relay events.
                 </div>
               </div>
             </div>

@@ -1951,8 +1951,10 @@ textarea.input { resize: vertical; min-height: 72px; }
 .records-event-heading {
   display: flex; align-items: center; gap: 6px;
   font-size: 13px; font-weight: 600; color: var(--text-secondary);
-  margin-bottom: 6px; padding-left: 2px;
+  margin-bottom: 6px; padding: 4px 6px 4px 2px; border-radius: var(--radius-sm);
+  transition: background 0.12s, color 0.12s;
 }
+.records-event-heading:hover { background: var(--bg-hover); color: var(--text); }
 .records-chevron { color: var(--accent); flex-shrink: 0; }
 .records-count {
   margin-left: auto; font-size: 11px; font-weight: 400;

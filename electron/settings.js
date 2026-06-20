@@ -15,9 +15,9 @@ function readSettings() {
 
 function writeSettings(updates) {
   const current = readSettings()
-  // Strip undefined/null so we never silently delete a saved key
+  // Strip only undefined — allow null/empty to explicitly clear a saved key
   const clean = Object.fromEntries(
-    Object.entries(updates).filter(([, v]) => v !== undefined && v !== null && v !== '')
+    Object.entries(updates).filter(([, v]) => v !== undefined)
   )
   const next = { ...current, ...clean }
   fs.writeFileSync(getPath(), JSON.stringify(next, null, 2), 'utf8')
