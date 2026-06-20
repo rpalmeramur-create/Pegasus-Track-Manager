@@ -1256,6 +1256,14 @@ textarea.input { resize: vertical; min-height: 72px; }
 .al-wsm-mark  { font-size: 12pt; font-family: 'Courier New', monospace; font-weight: 800; color: #111; white-space: nowrap; flex-shrink: 0; }
 .al-wsm-meta  { font-size: 8pt; color: #555; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 1; min-width: 0; }
 
+/* Square label (1"×1") */
+.al-label-sq { width: 1in; height: 1in; display: flex; flex-direction: column; justify-content: center; padding: 0.05in 0.06in; gap: 1.5px; overflow: hidden; }
+.al-sq-place { font-size: 9pt; font-weight: 800; letter-spacing: 0.04em; line-height: 1; }
+.al-sq-name  { font-size: 7.5pt; font-weight: 700; line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.al-sq-event { font-size: 6pt; color: #444; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.al-sq-mark  { font-size: 7pt; font-family: 'Courier New', monospace; font-weight: 800; color: #111; line-height: 1; }
+.al-sq-meta  { font-size: 5pt; color: #666; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 .print-modal-overlay {
   position: fixed; inset: 0; z-index: 1000;
   background: rgba(0,0,0,0.75);

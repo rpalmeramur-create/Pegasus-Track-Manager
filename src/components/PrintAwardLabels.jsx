@@ -16,6 +16,7 @@ export const LABEL_FORMATS = [
   { id:'thermal4x2', label:'Thermal — 4″ × 2″',       sub:'one per page',  isSheet:false, perSheet:1,   pageSize:'4in 2in',              labelVariant:'lg'      },
   { id:'thermal2x4', label:'Thermal — 2″ × 4″',       sub:'one per page',  isSheet:false, perSheet:1,   pageSize:'2in 4in',              labelVariant:'tall'    },
   { id:'thermal1x4', label:'Thermal — 1″ × 4″',       sub:'one per page',  isSheet:false, perSheet:1,   pageSize:'4in 1in',              labelVariant:'wide-sm' },
+  { id:'thermal1x1', label:'Thermal — 1″ × 1″',       sub:'one per page',  isSheet:false, perSheet:1,   pageSize:'1in 1in',              labelVariant:'sq'      },
 ]
 
 // ─── LabelContent ─────────────────────────────────────────────
@@ -33,6 +34,18 @@ export function LabelContent({ lbl, variant, includeMark, meetDateStr }) {
         <div className="al-sm-name">{lastName}, {firstName}</div>
         {includeMark && mark && <div className="al-sm-mark">{mark}</div>}
         <div className="al-sm-bottom">{meetName} · {meetDateStr}</div>
+      </div>
+    )
+  }
+
+  if (variant === 'sq') {
+    return (
+      <div className="al-label al-label-sq">
+        <div className="al-sq-place" style={{ color: placeColor }}>{ordinal} PLACE</div>
+        <div className="al-sq-name">{lastName}, {firstName}</div>
+        <div className="al-sq-event">{eventLine}</div>
+        {includeMark && mark && <div className="al-sq-mark">{mark}</div>}
+        <div className="al-sq-meta">{meetName}</div>
       </div>
     )
   }
