@@ -2125,6 +2125,183 @@ function ImportFinishLynxModal({ meet, onImported, onClose }) {
   )
 }
 
+// ─── Print Meet Program Modal (bullpen running order) ─────
+function PrintMeetProgramModal({ meet, meetDetail, onClose }) {
+  const [eventsData, setEventsData] = useState([])
+  const [loading,    setLoading]    = useState(true)
+  const printRef = useRef(null)
+
+  useEffect(() => {
+    if (meetDetail.events.length === 0) { setLoading(false); return }
+    Promise.all(meetDetail.events.map(ev => api.getMeetEventEntries(ev.id).catch(() => null)))
+      .then(data => { setEventsData(data.filter(Boolean)); setLoading(false) })
+  }, [meetDetail.events])
+
+  const meetDate = new Date(meet.date + 'T00:00:00')
+    .toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+
+  const groupByHeat = (entries) => {
+    const seeded   = entries.filter(en => en.heat)
+    const unseeded = entries.filter(en => !en.heat)
+    const map = {}
+    for (const en of seeded) {
+      if (!map[en.heat]) map[[en.heat]] = []
+      map[en.heat].push(en)
+    }
+    const heats = Object.entries(map)
+      .sort(([a], [b]) => Number(a) - Number(b))
+      .map(([h, rows]) => ({ heat: Number(h), rows: rows.sort((a, b) => (a.lane ?? 99) - (b.lane ?? 99)) }))
+    return { heats, unseeded }
+  }
+
+  const thStyle = { padding: '3px 6px', textAlign: 'left', fontSize: '7pt', fontWeight: 700,
+    color: '#555', letterSpacing: '0.05em', borderBottom: '1pt solid #ccc', background: '#f5f5f5' }
+  const tdStyle = { padding: '3px 6px', fontSize: '8pt', borderBottom: '0.5pt solid #eee' }
+  const tdCtr   = { ...tdStyle, textAlign: 'center' }
+
+  const content = eventsData.map((ev, evIdx) => {
+    const isField = ev.category === 'field' || ev.category === 'combined'
+    const nonScr  = (ev.entries ?? []).filter(en => !en.scratched)
+    const { heats, unseeded } = groupByHeat(nonScr)
+    const heatWord = isField ? 'Flight' : 'Heat'
+
+    const gStr = ev.gender === 'M' ? 'Boys' : ev.gender === 'F' ? 'Girls' : 'Mixed'
+    const eventLabel = [
+      `Event ${evIdx + 1}`,
+      ev.event_name?.toUpperCase(),
+      gStr.toUpperCase(),
+      ev.age_group || null,
+      (ev.round && ev.round !== 'final') ? ev.round.toUpperCase() : null,
+    ].filter(Boolean).join(' · ')
+
+    return (
+      <div key={ev.id} style={{ marginBottom: 10, breakInside: 'avoid' }}>
+        {/* Event header */}
+        <div style={{
+          background: '#1a1a2e', color: '#fff', padding: '4px 8px',
+          fontSize: '8pt', fontWeight: 800, letterSpacing: '0.07em',
+          borderRadius: '2px 2px 0 0',
+        }}>
+          {eventLabel}
+        </div>
+
+        {heats.length === 0 && unseeded.length === 0 && (
+          <div style={{ padding: '4px 8px', fontSize: '8pt', color: '#999', fontStyle: 'italic',
+            border: '0.5pt solid #ddd', borderTop: 'none' }}>
+            No entries
+          </div>
+        )}
+
+        {heats.map(({ heat, rows }) => (
+          <div key={heat} style={{ marginBottom: 2 }}>
+            <div style={{
+              background: '#e8eaf0', padding: '2px 8px',
+              fontSize: '7.5pt', fontWeight: 700, color: '#333', letterSpacing: '0.04em',
+            }}>
+              {heatWord} {heat} of {heats.length}
+            </div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', border: '0.5pt solid #ddd' }}>
+              <thead>
+                <tr>
+                  <th style={{ ...thStyle, width: 20, textAlign: 'center' }}>✓</th>
+                  <th style={{ ...thStyle, width: 24, textAlign: 'center' }}>{isField ? 'Pos' : 'Ln'}</th>
+                  <th style={{ ...thStyle, width: 28, textAlign: 'center' }}>#</th>
+                  <th style={thStyle}>Athlete</th>
+                  <th style={{ ...thStyle, width: 90 }}>Team</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((en, i) => (
+                  <tr key={en.id} style={{ background: i % 2 === 1 ? '#fafafa' : '#fff' }}>
+                    <td style={{ ...tdCtr, width: 20 }}>
+                      <span style={{ display: 'inline-block', width: 10, height: 10,
+                        border: '0.75pt solid #999', borderRadius: 2 }} />
+                    </td>
+                    <td style={{ ...tdCtr, width: 24 }}>{en.lane || '—'}</td>
+                    <td style={{ ...tdCtr, width: 28, fontWeight: 600 }}>{en.athlete_number || '—'}</td>
+                    <td style={tdStyle}>{en.last_name || en.gname || '—'}{en.first_name ? `, ${en.first_name}` : ''}</td>
+                    <td style={{ ...tdStyle, color: '#555' }}>{en.team || en.gteam || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))}
+
+        {unseeded.length > 0 && (
+          <div style={{ marginBottom: 2 }}>
+            <div style={{ background: '#e8eaf0', padding: '2px 8px', fontSize: '7.5pt', fontWeight: 700, color: '#888' }}>
+              Unseeded ({unseeded.length})
+            </div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', border: '0.5pt solid #ddd' }}>
+              <tbody>
+                {unseeded.map((en, i) => (
+                  <tr key={en.id} style={{ background: i % 2 === 1 ? '#fafafa' : '#fff' }}>
+                    <td style={{ ...tdCtr, width: 20 }}>
+                      <span style={{ display: 'inline-block', width: 10, height: 10,
+                        border: '0.75pt solid #999', borderRadius: 2 }} />
+                    </td>
+                    <td style={{ ...tdCtr, width: 24 }}>—</td>
+                    <td style={{ ...tdCtr, width: 28, fontWeight: 600 }}>{en.athlete_number || '—'}</td>
+                    <td style={tdStyle}>{en.last_name || en.gname || '—'}{en.first_name ? `, ${en.first_name}` : ''}</td>
+                    <td style={{ ...tdStyle, color: '#555' }}>{en.team || en.gteam || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    )
+  })
+
+  return (
+    <div className="print-modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="print-preview-container">
+
+        {/* Toolbar */}
+        <div className="print-toolbar no-print" style={{ padding: '10px 20px', gap: 10 }}>
+          <span style={{ fontWeight: 600, fontSize: 14 }}>📋 Meet Program</span>
+          <span style={{ fontSize: 12, color: '#999', marginLeft: 4 }}>{meet.name}</span>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+            <button className="btn btn-ghost" onClick={() => savePdfHtml(printRef, meet.name, 'Meet-Program')}>⬇ Save PDF</button>
+            <button className="btn btn-primary" onClick={() => printSheetHtml(printRef)}>🖨 Print</button>
+            <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={15} /></button>
+          </div>
+        </div>
+
+        {/* Preview */}
+        <div className="print-sheet-scroll">
+          {loading ? (
+            <div style={{ padding: 40, textAlign: 'center', color: '#aaa' }}>Loading…</div>
+          ) : (
+            <div ref={printRef}>
+              <div className="print-sheet" style={{ fontFamily: 'Arial, sans-serif', color: '#000', background: '#fff' }}>
+                {/* Page header */}
+                <div style={{ borderBottom: '1.5pt solid #000', paddingBottom: 6, marginBottom: 10 }}>
+                  <div style={{ fontSize: '13pt', fontWeight: 800, letterSpacing: '0.05em' }}>
+                    MEET PROGRAM — BULLPEN RUNNING ORDER
+                  </div>
+                  <div style={{ fontSize: '9pt', color: '#333', marginTop: 2 }}>
+                    {meet.name} · {meetDate}
+                    {meet.location ? ` · ${meet.location}` : ''}
+                  </div>
+                </div>
+
+                {eventsData.length === 0
+                  ? <p style={{ color: '#999', fontSize: '9pt' }}>No events with entries yet.</p>
+                  : <div style={{ columns: '2', columnGap: '16pt' }}>{content}</div>
+                }
+              </div>
+            </div>
+          )}
+        </div>
+
+      </div>
+    </div>
+  )
+}
+
 // ─── Print Heat Sheet Modal ───────────────────────────────
 function PrintHeatSheetModal({ meet, meetDetail, onClose }) {
   const [eventsData,       setEventsData]       = useState([])
@@ -3953,7 +4130,8 @@ function MeetDetail({ meet, onBack, onMeetUpdated }) {
   const [tab,        setTab]        = useState('events')
   const [loading,    setLoading]    = useState(true)
   const [editingMeet,   setEditingMeet]   = useState(false)
-  const [showHeatSheet, setShowHeatSheet] = useState(false)
+  const [showHeatSheet,    setShowHeatSheet]    = useState(false)
+  const [showMeetProgram,  setShowMeetProgram]  = useState(false)
   const [seasons,       setSeasons]       = useState([])
 
   const loadDetail = useCallback(() => {
@@ -4084,6 +4262,10 @@ function MeetDetail({ meet, onBack, onMeetUpdated }) {
               🖨 Heat Sheets
             </button>
             <button className="btn btn-ghost" style={{ fontSize: 12 }}
+              onClick={() => setShowMeetProgram(true)} title="Print bullpen meet program">
+              📋 Program
+            </button>
+            <button className="btn btn-ghost" style={{ fontSize: 12 }}
               onClick={handleOpenMeetLabels} disabled={loadingLabels || meetDetail.events.length === 0}
               title="Print award labels for all events">
               {loadingLabels ? '⏳…' : '🏷 Award Labels'}
@@ -4154,6 +4336,14 @@ function MeetDetail({ meet, onBack, onMeetUpdated }) {
           meet={meetDetail}
           meetDetail={meetDetail}
           onClose={() => setShowHeatSheet(false)}
+        />
+      )}
+
+      {showMeetProgram && (
+        <PrintMeetProgramModal
+          meet={meetDetail}
+          meetDetail={meetDetail}
+          onClose={() => setShowMeetProgram(false)}
         />
       )}
 
