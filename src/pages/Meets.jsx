@@ -2160,6 +2160,7 @@ function PrintMeetProgramModal({ meet, meetDetail, onClose }) {
   const [eventsData,  setEventsData]  = useState([])
   const [loading,     setLoading]     = useState(true)
   const [eventOrder,  setEventOrder]  = useState([])   // ordered array of event IDs
+  const [columns,     setColumns]     = useState(2)
   const [dragIdx,     setDragIdx]     = useState(null)
   const [dragOverIdx, setDragOverIdx] = useState(null)
   const printRef = useRef(null)
@@ -2308,6 +2309,16 @@ function PrintMeetProgramModal({ meet, meetDetail, onClose }) {
             onClick={() => setEventOrder(defaultProgramOrder(eventsData))}>
             ↺ Reset Order
           </button>
+          <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Columns</span>
+            {[1, 2, 3, 4].map(n => (
+              <button key={n} onClick={() => setColumns(n)}
+                className={`btn ${columns === n ? 'btn-primary' : 'btn-ghost'}`}
+                style={{ fontSize: 11, padding: '3px 10px', minWidth: 28 }}>
+                {n}
+              </button>
+            ))}
+          </div>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
             <button className="btn btn-ghost" onClick={() => savePdfHtml(printRef, meet.name, 'Meet-Program')}>⬇ Save PDF</button>
             <button className="btn btn-primary" onClick={() => printSheetHtml(printRef)}>🖨 Print</button>
@@ -2381,7 +2392,7 @@ function PrintMeetProgramModal({ meet, meetDetail, onClose }) {
                   </div>
                   {orderedEvents.length === 0
                     ? <p style={{ color: '#999', fontSize: '9pt' }}>No events with entries yet.</p>
-                    : <div style={{ columns: '2', columnGap: '16pt' }}>
+                    : <div style={{ columns: columns, columnGap: '14pt' }}>
                         {orderedEvents.map((ev, i) => renderEvent(ev, i))}
                       </div>
                   }
