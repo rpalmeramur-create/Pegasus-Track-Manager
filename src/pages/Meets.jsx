@@ -2210,92 +2210,131 @@ function PrintMeetProgramModal({ meet, meetDetail, onClose }) {
     return { heats, unseeded }
   }
 
+  // Estimate print height score for an event (used for page-splitting)
+  const scoreEvent = (ev) => {
+    const nonScr = (ev.entries ?? []).filter(en => !en.scratched)
+    const heatNums = [...new Set(nonScr.filter(e => e.heat).map(e => e.heat))]
+    const unseededCount = nonScr.filter(e => !e.heat).length
+    let s = 2.5 // event header + bottom margin
+    for (const h of heatNums) {
+      s += 2.2 + nonScr.filter(e => e.heat === h).length * 0.95
+    }
+    if (unseededCount > 0) s += 2.2 + unseededCount * 0.95
+    return s
+  }
+
+  // Distribute events into pages × columns, filling sequentially
+  const PAGE_CAP = 42 // score units per column per page (≈9in at our font sizes)
+  const distributePages = (events, numCols) => {
+    const pages = []
+    let page = [], col = [], colScore = 0, colIdx = 0
+    for (const ev of events) {
+      const s = scoreEvent(ev)
+      if (colScore + s > PAGE_CAP && col.length > 0) {
+        page.push(col); col = []; colScore = 0; colIdx++
+        if (colIdx >= numCols) { pages.push(page); page = []; colIdx = 0 }
+      }
+      col.push(ev); colScore += s
+    }
+    if (col.length > 0) page.push(col)
+    if (page.length > 0) pages.push(page)
+    return pages
+  }
+
   const thStyle = { padding: '3px 6px', textAlign: 'left', fontSize: '7pt', fontWeight: 700,
     color: '#555', letterSpacing: '0.05em', borderBottom: '1pt solid #ccc', background: '#f5f5f5' }
   const tdStyle = { padding: '3px 6px', fontSize: '8pt', borderBottom: '0.5pt solid #eee' }
   const tdCtr   = { ...tdStyle, textAlign: 'center' }
 
-  const renderEvent = (ev, evIdx) => {
+  const renderAthleteRows = (rows, isField) => rows.map((en, i) => (
+    <tr key={en.id} style={{ background: i % 2 === 1 ? '#fafafa' : '#fff' }}>
+      <td style={{ ...tdCtr, width: 18 }}>
+        <span style={{ display: 'inline-block', width: 10, height: 10,
+          border: '0.75pt solid #999', borderRadius: 2 }} />
+      </td>
+      <td style={{ ...tdCtr, width: 22 }}>{isField ? (en.lane || '—') : (en.lane || '—')}</td>
+      <td style={{ ...tdCtr, width: 26, fontWeight: 600 }}>{en.athlete_number || '—'}</td>
+      <td style={tdStyle}>{en.last_name || en.gname || '—'}{en.first_name ? `, ${en.first_name}` : ''}</td>
+      <td style={{ ...tdStyle, width: 80, color: '#555' }}>{en.team || en.gteam || '—'}</td>
+      <td style={{ ...tdCtr, width: 48, fontFamily: 'Courier New, monospace', fontSize: '7.5pt', color: '#222' }}>
+        {en.seed_mark || '—'}
+      </td>
+    </tr>
+  ))
+
+  const renderEventBlock = (ev, globalIdx) => {
     const isField  = ev.category === 'field' || ev.category === 'combined'
     const nonScr   = (ev.entries ?? []).filter(en => !en.scratched)
     const { heats, unseeded } = groupByHeat(nonScr)
     const heatWord = isField ? 'Flight' : 'Heat'
     const gStr     = ev.gender === 'M' ? 'Boys' : ev.gender === 'F' ? 'Girls' : 'Mixed'
     const label    = [
-      `Evt ${evIdx + 1}`,
+      `Evt ${globalIdx + 1}`,
       ev.event_name?.toUpperCase(),
       gStr.toUpperCase(),
       ev.age_group || null,
       (ev.round && ev.round !== 'final') ? ev.round.toUpperCase() : null,
     ].filter(Boolean).join(' · ')
 
+    const tableHead = (
+      <thead><tr>
+        <th style={{ ...thStyle, width: 18, textAlign: 'center' }}>✓</th>
+        <th style={{ ...thStyle, width: 22, textAlign: 'center' }}>{isField ? 'Pos' : 'Ln'}</th>
+        <th style={{ ...thStyle, width: 26, textAlign: 'center' }}>#</th>
+        <th style={thStyle}>Athlete</th>
+        <th style={{ ...thStyle, width: 80 }}>Team</th>
+        <th style={{ ...thStyle, width: 48, textAlign: 'center' }}>Seed</th>
+      </tr></thead>
+    )
+
     return (
-      <div key={ev.id} style={{ marginBottom: 10, breakInside: 'avoid' }}>
+      <div key={ev.id} style={{ marginBottom: 9, breakInside: 'avoid' }}>
         <div style={{ background: '#1a1a2e', color: '#fff', padding: '4px 8px',
-          fontSize: '8pt', fontWeight: 800, letterSpacing: '0.06em', borderRadius: '2px 2px 0 0' }}>
+          fontSize: '7.5pt', fontWeight: 800, letterSpacing: '0.06em', borderRadius: '2px 2px 0 0' }}>
           {label}
         </div>
-        {heats.length === 0 && unseeded.length === 0 && (
-          <div style={{ padding: '4px 8px', fontSize: '8pt', color: '#999', fontStyle: 'italic',
-            border: '0.5pt solid #ddd', borderTop: 'none' }}>No entries</div>
-        )}
         {heats.map(({ heat, rows }) => (
-          <div key={heat} style={{ marginBottom: 2 }}>
+          <div key={heat} style={{ marginBottom: 1 }}>
             <div style={{ background: '#e8eaf0', padding: '2px 8px',
-              fontSize: '7.5pt', fontWeight: 700, color: '#333', letterSpacing: '0.04em' }}>
+              fontSize: '7pt', fontWeight: 700, color: '#333', letterSpacing: '0.04em' }}>
               {heatWord} {heat} of {heats.length}
             </div>
             <table style={{ width: '100%', borderCollapse: 'collapse', border: '0.5pt solid #ddd' }}>
-              <thead><tr>
-                <th style={{ ...thStyle, width: 20, textAlign: 'center' }}>✓</th>
-                <th style={{ ...thStyle, width: 24, textAlign: 'center' }}>{isField ? 'Pos' : 'Ln'}</th>
-                <th style={{ ...thStyle, width: 28, textAlign: 'center' }}>#</th>
-                <th style={thStyle}>Athlete</th>
-                <th style={{ ...thStyle, width: 90 }}>Team</th>
-              </tr></thead>
-              <tbody>
-                {rows.map((en, i) => (
-                  <tr key={en.id} style={{ background: i % 2 === 1 ? '#fafafa' : '#fff' }}>
-                    <td style={{ ...tdCtr, width: 20 }}>
-                      <span style={{ display: 'inline-block', width: 10, height: 10,
-                        border: '0.75pt solid #999', borderRadius: 2 }} />
-                    </td>
-                    <td style={{ ...tdCtr, width: 24 }}>{en.lane || '—'}</td>
-                    <td style={{ ...tdCtr, width: 28, fontWeight: 600 }}>{en.athlete_number || '—'}</td>
-                    <td style={tdStyle}>{en.last_name || en.gname || '—'}{en.first_name ? `, ${en.first_name}` : ''}</td>
-                    <td style={{ ...tdStyle, color: '#555' }}>{en.team || en.gteam || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
+              {tableHead}
+              <tbody>{renderAthleteRows(rows, isField)}</tbody>
             </table>
           </div>
         ))}
         {unseeded.length > 0 && (
-          <div style={{ marginBottom: 2 }}>
-            <div style={{ background: '#e8eaf0', padding: '2px 8px', fontSize: '7.5pt', fontWeight: 700, color: '#888' }}>
+          <div style={{ marginBottom: 1 }}>
+            <div style={{ background: '#e8eaf0', padding: '2px 8px', fontSize: '7pt', fontWeight: 700, color: '#888' }}>
               Unseeded ({unseeded.length})
             </div>
             <table style={{ width: '100%', borderCollapse: 'collapse', border: '0.5pt solid #ddd' }}>
-              <tbody>
-                {unseeded.map((en, i) => (
-                  <tr key={en.id} style={{ background: i % 2 === 1 ? '#fafafa' : '#fff' }}>
-                    <td style={{ ...tdCtr, width: 20 }}>
-                      <span style={{ display: 'inline-block', width: 10, height: 10,
-                        border: '0.75pt solid #999', borderRadius: 2 }} />
-                    </td>
-                    <td style={{ ...tdCtr, width: 24 }}>—</td>
-                    <td style={{ ...tdCtr, width: 28, fontWeight: 600 }}>{en.athlete_number || '—'}</td>
-                    <td style={tdStyle}>{en.last_name || en.gname || '—'}{en.first_name ? `, ${en.first_name}` : ''}</td>
-                    <td style={{ ...tdStyle, color: '#555' }}>{en.team || en.gteam || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
+              {tableHead}
+              <tbody>{renderAthleteRows(unseeded, isField)}</tbody>
             </table>
           </div>
         )}
       </div>
     )
   }
+
+  const pageHeader = (
+    <div style={{ borderBottom: '1.5pt solid #000', paddingBottom: 5, marginBottom: 8 }}>
+      <div style={{ fontSize: '12pt', fontWeight: 800, letterSpacing: '0.05em' }}>
+        MEET PROGRAM — BULLPEN RUNNING ORDER
+      </div>
+      <div style={{ fontSize: '8.5pt', color: '#333', marginTop: 2 }}>
+        {meet.name} · {meetDate}{meet.location ? ` · ${meet.location}` : ''}
+      </div>
+    </div>
+  )
+
+  const pages = distributePages(orderedEvents, columns)
+  // Map ev.id → global index for sequential numbering
+  const globalIdx = {}
+  orderedEvents.forEach((ev, i) => { globalIdx[ev.id] = i })
 
   return (
     <div className="print-modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
@@ -2375,28 +2414,30 @@ function PrintMeetProgramModal({ meet, meetDetail, onClose }) {
             }
           </div>
 
-          {/* Right: scrollable preview */}
+          {/* Right: scrollable preview — one .print-sheet per page */}
           <div className="print-sheet-scroll" style={{ flex: 1 }}>
             {loading ? (
               <div style={{ padding: 40, textAlign: 'center', color: '#aaa' }}>Loading…</div>
+            ) : orderedEvents.length === 0 ? (
+              <div style={{ padding: 40, textAlign: 'center', color: '#aaa' }}>No events with entries yet.</div>
             ) : (
               <div ref={printRef}>
-                <div className="print-sheet" style={{ fontFamily: 'Arial, sans-serif', color: '#000', background: '#fff' }}>
-                  <div style={{ borderBottom: '1.5pt solid #000', paddingBottom: 6, marginBottom: 10 }}>
-                    <div style={{ fontSize: '13pt', fontWeight: 800, letterSpacing: '0.05em' }}>
-                      MEET PROGRAM — BULLPEN RUNNING ORDER
-                    </div>
-                    <div style={{ fontSize: '9pt', color: '#333', marginTop: 2 }}>
-                      {meet.name} · {meetDate}{meet.location ? ` · ${meet.location}` : ''}
+                {pages.map((page, pi) => (
+                  <div key={pi} className="print-sheet"
+                    style={{ fontFamily: 'Arial, sans-serif', color: '#000', background: '#fff',
+                      pageBreakAfter: pi < pages.length - 1 ? 'always' : 'auto' }}>
+                    {pageHeader}
+                    <div style={{ display: 'grid',
+                      gridTemplateColumns: `repeat(${columns}, 1fr)`,
+                      gap: '12pt', alignItems: 'start' }}>
+                      {Array.from({ length: columns }, (_, ci) => (
+                        <div key={ci}>
+                          {(page[ci] ?? []).map(ev => renderEventBlock(ev, globalIdx[ev.id]))}
+                        </div>
+                      ))}
                     </div>
                   </div>
-                  {orderedEvents.length === 0
-                    ? <p style={{ color: '#999', fontSize: '9pt' }}>No events with entries yet.</p>
-                    : <div style={{ columns: columns, columnGap: '14pt' }}>
-                        {orderedEvents.map((ev, i) => renderEvent(ev, i))}
-                      </div>
-                  }
-                </div>
+                ))}
               </div>
             )}
           </div>
