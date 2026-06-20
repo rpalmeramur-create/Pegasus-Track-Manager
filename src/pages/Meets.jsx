@@ -2169,6 +2169,7 @@ function PrintMeetProgramModal({ meet, meetDetail, onClose }) {
     Promise.all(meetDetail.events.map(ev => api.getMeetEventEntries(ev.id).catch(() => null)))
       .then(data => {
         const d = data.filter(Boolean)
+          .filter(ev => (ev.entries ?? []).some(en => !en.scratched))
         setEventsData(d)
         setEventOrder(defaultProgramOrder(d))
         setLoading(false)
