@@ -4323,7 +4323,7 @@ function MeetDetail({ meet, onBack, onMeetUpdated }) {
   }
 
   return (
-    <div className="meets-page">
+    <div className="meets-page meets-detail-page">
       {/* Back + header */}
       <div className="page-header">
         <div>
