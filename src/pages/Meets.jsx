@@ -980,6 +980,7 @@ function WorksheetTab({ meet, meetDetail }) {
   const [actionMsg,     setActionMsg]     = useState('')
   const [heatSize,      setHeatSize]      = useState(8)
   const [hurdleHeatSize, setHurdleHeatSize] = useState(8)
+  const [fieldHeatSize,  setFieldHeatSize]  = useState('')   // '' = unlimited
   const [useFlights,    setUseFlights]    = useState(false)
   const [seedingAll,    setSeedingAll]    = useState(false)
   const [showPrint,         setShowPrint]         = useState(false)
@@ -1074,7 +1075,8 @@ function WorksheetTab({ meet, meetDetail }) {
     setSeeding(true)
     await Promise.all(Object.keys(results).map(id => saveSeed(Number(id))))
     const noFlights = isField && !useFlights
-    await api.seedEvent(selectedEvent.id, heatSize, { noFlights })
+    const effectiveSize = isField ? (Number(fieldHeatSize) || 9999) : heatSize
+    await api.seedEvent(selectedEvent.id, effectiveSize, { noFlights })
     const d = await api.getMeetEventEntries(selectedEvent.id)
     setEventDetail(d)
     setSeeding(false)
@@ -1137,18 +1139,34 @@ function WorksheetTab({ meet, meetDetail }) {
       {/* Left: event list */}
       <div className="meets-col-left">
         <div className="meets-col-header"><List size={13} /> Events</div>
-        {/* Hurdle bulk seeding */}
+        {/* Seeding controls */}
         {(() => {
           const hurdleCount = meetDetail.events.filter(ev => /HURDLE/i.test(ev.event_name)).length
+          const inputStyle = { width: 38, padding: '2px 4px', fontSize: 11, borderRadius: 4,
+            border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text)',
+            textAlign: 'center' }
           return (
             <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)',
-              display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Hurdles/heat:</span>
-              <input type="number" min={2} max={10} value={hurdleHeatSize}
-                onChange={e => setHurdleHeatSize(Math.max(2, Math.min(10, Number(e.target.value) || 8)))}
-                style={{ width: 38, padding: '2px 4px', fontSize: 11, borderRadius: 4,
-                  border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text)',
-                  textAlign: 'center' }} />
+              display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                Per heat:
+                <input type="number" min={2} max={10} value={heatSize}
+                  onChange={e => setHeatSize(Math.max(2, Math.min(10, Number(e.target.value) || 8)))}
+                  style={inputStyle} />
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                Field:
+                <input type="number" min={1} value={fieldHeatSize}
+                  onChange={e => setFieldHeatSize(e.target.value === '' ? '' : Math.max(1, Number(e.target.value)))}
+                  placeholder="∞"
+                  style={{ ...inputStyle, width: 38 }} />
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                Hurdles:
+                <input type="number" min={2} max={10} value={hurdleHeatSize}
+                  onChange={e => setHurdleHeatSize(Math.max(2, Math.min(10, Number(e.target.value) || 8)))}
+                  style={inputStyle} />
+              </label>
               <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 8px', whiteSpace: 'nowrap' }}
                 onClick={handleSeedAllHurdles} disabled={seedingAll || hurdleCount === 0}
                 title={hurdleCount === 0 ? 'No hurdle events in this meet' : `Seed all ${hurdleCount} hurdle event${hurdleCount !== 1 ? 's' : ''}`}>
@@ -1201,20 +1219,11 @@ function WorksheetTab({ meet, meetDetail }) {
                   {' · '}{isField ? 'Field — highest mark wins' : 'Track — lowest time wins'}
                 </div>
               </div>
-              {isField ? (
+              {isField && (
                 <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>
                   <input type="checkbox" checked={useFlights} onChange={e => setUseFlights(e.target.checked)}
                     style={{ accentColor: 'var(--acc)' }} />
                   Use flights
-                </label>
-              ) : (
-                <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--text-muted)' }}>
-                  Per heat:
-                  <input type="number" min={2} max={10} value={heatSize}
-                    onChange={e => setHeatSize(Math.max(2, Math.min(10, Number(e.target.value) || 8)))}
-                    style={{ width: 42, padding: '3px 5px', fontSize: 11, borderRadius: 4,
-                      border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text)',
-                      textAlign: 'center' }} />
                 </label>
               )}
               <button className="btn btn-ghost" style={{ fontSize: 11, padding: '5px 10px' }}
@@ -4454,7 +4463,8 @@ function MeetDetail({ meet, onBack, onMeetUpdated }) {
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
           {nextStatuses[meetDetail.status]?.map(s => (
-            <button key={s} className="btn btn-ghost" style={{ fontSize: 12 }}
+            <button key={s} className="btn btn-ghost" style={{ fontSize: 12,
+              background: 'var(--bg-card)', color: 'var(--text)', borderColor: 'var(--border-light)' }}
               onClick={() => handleStatusChange(s)}>
               {s === 'active'      ? <Play        size={13} /> :
                s === 'in_progress' ? null :
@@ -4463,21 +4473,25 @@ function MeetDetail({ meet, onBack, onMeetUpdated }) {
             </button>
           ))}
           {meetDetail.type !== 'runathon' && (<>
-            <button className="btn btn-ghost" style={{ fontSize: 12 }}
+            <button className="btn btn-ghost" style={{ fontSize: 12,
+              background: 'var(--bg-card)', color: 'var(--text)', borderColor: 'var(--border-light)' }}
               onClick={() => setShowHeatSheet(true)} title="Print heat sheets">
               🖨 Heat Sheets
             </button>
-            <button className="btn btn-ghost" style={{ fontSize: 12 }}
+            <button className="btn btn-ghost" style={{ fontSize: 12,
+              background: 'var(--bg-card)', color: 'var(--text)', borderColor: 'var(--border-light)' }}
               onClick={() => setShowMeetProgram(true)} title="Print bullpen meet program">
               📋 Program
             </button>
-            <button className="btn btn-ghost" style={{ fontSize: 12 }}
+            <button className="btn btn-ghost" style={{ fontSize: 12,
+              background: 'var(--bg-card)', color: 'var(--text)', borderColor: 'var(--border-light)' }}
               onClick={handleOpenMeetLabels} disabled={loadingLabels || meetDetail.events.length === 0}
               title="Print award labels for all events">
               {loadingLabels ? '⏳…' : '🏷 Award Labels'}
             </button>
           </>)}
-          <button className="btn btn-ghost btn-icon" onClick={() => setEditingMeet(true)} title="Edit meet">
+          <button className="btn btn-ghost btn-icon" style={{ background: 'var(--bg-card)', borderColor: 'var(--border-light)' }}
+            onClick={() => setEditingMeet(true)} title="Edit meet">
             <Edit2 size={14} />
           </button>
         </div>
