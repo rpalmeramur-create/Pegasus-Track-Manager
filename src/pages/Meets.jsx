@@ -2126,16 +2126,70 @@ function ImportFinishLynxModal({ meet, onImported, onClose }) {
 }
 
 // ─── Print Meet Program Modal (bullpen running order) ─────
+function evtPriority(name = '') {
+  const n = name.toUpperCase()
+  if (/3200/.test(n))                          return 10
+  if (/3000/.test(n))                          return 11
+  if (/HURDLE/.test(n))                        return 20
+  if (/(?<!\d)50(?!\d)/.test(n))              return 30
+  if (/(?<!\d)100(?!\d)/.test(n))             return 40
+  if (/1600/.test(n))                          return 50
+  if (/1500/.test(n))                          return 51
+  if (/1000/.test(n))                          return 52
+  if (/(?<!\d)400(?!\d)/.test(n))             return 60
+  if (/(?<!\d)800(?!\d)/.test(n))             return 70
+  if (/(?<!\d)200(?!\d)/.test(n))             return 80
+  if (/RELAY|4\s*X/.test(n))                  return 90
+  if (/JUMP|VAULT/.test(n))                   return 100
+  if (/PUT|THROW|DISCUS|JAVELIN|HAMMER/.test(n)) return 110
+  return 120
+}
+function agePriority(ag = '') {
+  const m = (ag || '').match(/\d+/)
+  return m ? parseInt(m[0]) : 999
+}
+function defaultProgramOrder(events) {
+  return [...events].sort((a, b) => {
+    const pd = evtPriority(a.event_name) - evtPriority(b.event_name)
+    if (pd !== 0) return pd
+    return agePriority(a.age_group) - agePriority(b.age_group)
+  }).map(e => e.id)
+}
+
 function PrintMeetProgramModal({ meet, meetDetail, onClose }) {
-  const [eventsData, setEventsData] = useState([])
-  const [loading,    setLoading]    = useState(true)
+  const [eventsData,  setEventsData]  = useState([])
+  const [loading,     setLoading]     = useState(true)
+  const [eventOrder,  setEventOrder]  = useState([])   // ordered array of event IDs
+  const [dragIdx,     setDragIdx]     = useState(null)
+  const [dragOverIdx, setDragOverIdx] = useState(null)
   const printRef = useRef(null)
 
   useEffect(() => {
     if (meetDetail.events.length === 0) { setLoading(false); return }
     Promise.all(meetDetail.events.map(ev => api.getMeetEventEntries(ev.id).catch(() => null)))
-      .then(data => { setEventsData(data.filter(Boolean)); setLoading(false) })
+      .then(data => {
+        const d = data.filter(Boolean)
+        setEventsData(d)
+        setEventOrder(defaultProgramOrder(d))
+        setLoading(false)
+      })
   }, [meetDetail.events])
+
+  const orderedEvents = eventOrder.map(id => eventsData.find(e => e.id === id)).filter(Boolean)
+
+  const handleDragStart = (i) => setDragIdx(i)
+  const handleDragOver  = (e, i) => { e.preventDefault(); setDragOverIdx(i) }
+  const handleDrop = (e, i) => {
+    e.preventDefault()
+    if (dragIdx === null || dragIdx === i) { setDragIdx(null); setDragOverIdx(null); return }
+    const next = [...eventOrder]
+    const [moved] = next.splice(dragIdx, 1)
+    next.splice(i, 0, moved)
+    setEventOrder(next)
+    setDragIdx(null)
+    setDragOverIdx(null)
+  }
+  const handleDragEnd = () => { setDragIdx(null); setDragOverIdx(null) }
 
   const meetDate = new Date(meet.date + 'T00:00:00')
     .toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
@@ -2145,7 +2199,7 @@ function PrintMeetProgramModal({ meet, meetDetail, onClose }) {
     const unseeded = entries.filter(en => !en.heat)
     const map = {}
     for (const en of seeded) {
-      if (!map[en.heat]) map[[en.heat]] = []
+      if (!map[en.heat]) map[en.heat] = []
       map[en.heat].push(en)
     }
     const heats = Object.entries(map)
@@ -2159,15 +2213,14 @@ function PrintMeetProgramModal({ meet, meetDetail, onClose }) {
   const tdStyle = { padding: '3px 6px', fontSize: '8pt', borderBottom: '0.5pt solid #eee' }
   const tdCtr   = { ...tdStyle, textAlign: 'center' }
 
-  const content = eventsData.map((ev, evIdx) => {
-    const isField = ev.category === 'field' || ev.category === 'combined'
-    const nonScr  = (ev.entries ?? []).filter(en => !en.scratched)
+  const renderEvent = (ev, evIdx) => {
+    const isField  = ev.category === 'field' || ev.category === 'combined'
+    const nonScr   = (ev.entries ?? []).filter(en => !en.scratched)
     const { heats, unseeded } = groupByHeat(nonScr)
     const heatWord = isField ? 'Flight' : 'Heat'
-
-    const gStr = ev.gender === 'M' ? 'Boys' : ev.gender === 'F' ? 'Girls' : 'Mixed'
-    const eventLabel = [
-      `Event ${evIdx + 1}`,
+    const gStr     = ev.gender === 'M' ? 'Boys' : ev.gender === 'F' ? 'Girls' : 'Mixed'
+    const label    = [
+      `Evt ${evIdx + 1}`,
       ev.event_name?.toUpperCase(),
       gStr.toUpperCase(),
       ev.age_group || null,
@@ -2176,40 +2229,28 @@ function PrintMeetProgramModal({ meet, meetDetail, onClose }) {
 
     return (
       <div key={ev.id} style={{ marginBottom: 10, breakInside: 'avoid' }}>
-        {/* Event header */}
-        <div style={{
-          background: '#1a1a2e', color: '#fff', padding: '4px 8px',
-          fontSize: '8pt', fontWeight: 800, letterSpacing: '0.07em',
-          borderRadius: '2px 2px 0 0',
-        }}>
-          {eventLabel}
+        <div style={{ background: '#1a1a2e', color: '#fff', padding: '4px 8px',
+          fontSize: '8pt', fontWeight: 800, letterSpacing: '0.06em', borderRadius: '2px 2px 0 0' }}>
+          {label}
         </div>
-
         {heats.length === 0 && unseeded.length === 0 && (
           <div style={{ padding: '4px 8px', fontSize: '8pt', color: '#999', fontStyle: 'italic',
-            border: '0.5pt solid #ddd', borderTop: 'none' }}>
-            No entries
-          </div>
+            border: '0.5pt solid #ddd', borderTop: 'none' }}>No entries</div>
         )}
-
         {heats.map(({ heat, rows }) => (
           <div key={heat} style={{ marginBottom: 2 }}>
-            <div style={{
-              background: '#e8eaf0', padding: '2px 8px',
-              fontSize: '7.5pt', fontWeight: 700, color: '#333', letterSpacing: '0.04em',
-            }}>
+            <div style={{ background: '#e8eaf0', padding: '2px 8px',
+              fontSize: '7.5pt', fontWeight: 700, color: '#333', letterSpacing: '0.04em' }}>
               {heatWord} {heat} of {heats.length}
             </div>
             <table style={{ width: '100%', borderCollapse: 'collapse', border: '0.5pt solid #ddd' }}>
-              <thead>
-                <tr>
-                  <th style={{ ...thStyle, width: 20, textAlign: 'center' }}>✓</th>
-                  <th style={{ ...thStyle, width: 24, textAlign: 'center' }}>{isField ? 'Pos' : 'Ln'}</th>
-                  <th style={{ ...thStyle, width: 28, textAlign: 'center' }}>#</th>
-                  <th style={thStyle}>Athlete</th>
-                  <th style={{ ...thStyle, width: 90 }}>Team</th>
-                </tr>
-              </thead>
+              <thead><tr>
+                <th style={{ ...thStyle, width: 20, textAlign: 'center' }}>✓</th>
+                <th style={{ ...thStyle, width: 24, textAlign: 'center' }}>{isField ? 'Pos' : 'Ln'}</th>
+                <th style={{ ...thStyle, width: 28, textAlign: 'center' }}>#</th>
+                <th style={thStyle}>Athlete</th>
+                <th style={{ ...thStyle, width: 90 }}>Team</th>
+              </tr></thead>
               <tbody>
                 {rows.map((en, i) => (
                   <tr key={en.id} style={{ background: i % 2 === 1 ? '#fafafa' : '#fff' }}>
@@ -2227,7 +2268,6 @@ function PrintMeetProgramModal({ meet, meetDetail, onClose }) {
             </table>
           </div>
         ))}
-
         {unseeded.length > 0 && (
           <div style={{ marginBottom: 2 }}>
             <div style={{ background: '#e8eaf0', padding: '2px 8px', fontSize: '7.5pt', fontWeight: 700, color: '#888' }}>
@@ -2253,7 +2293,7 @@ function PrintMeetProgramModal({ meet, meetDetail, onClose }) {
         )}
       </div>
     )
-  })
+  }
 
   return (
     <div className="print-modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
@@ -2263,6 +2303,10 @@ function PrintMeetProgramModal({ meet, meetDetail, onClose }) {
         <div className="print-toolbar no-print" style={{ padding: '10px 20px', gap: 10 }}>
           <span style={{ fontWeight: 600, fontSize: 14 }}>📋 Meet Program</span>
           <span style={{ fontSize: 12, color: '#999', marginLeft: 4 }}>{meet.name}</span>
+          <button className="btn btn-ghost no-print" style={{ fontSize: 11 }}
+            onClick={() => setEventOrder(defaultProgramOrder(eventsData))}>
+            ↺ Reset Order
+          </button>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
             <button className="btn btn-ghost" onClick={() => savePdfHtml(printRef, meet.name, 'Meet-Program')}>⬇ Save PDF</button>
             <button className="btn btn-primary" onClick={() => printSheetHtml(printRef)}>🖨 Print</button>
@@ -2270,31 +2314,80 @@ function PrintMeetProgramModal({ meet, meetDetail, onClose }) {
           </div>
         </div>
 
-        {/* Preview */}
-        <div className="print-sheet-scroll">
-          {loading ? (
-            <div style={{ padding: 40, textAlign: 'center', color: '#aaa' }}>Loading…</div>
-          ) : (
-            <div ref={printRef}>
-              <div className="print-sheet" style={{ fontFamily: 'Arial, sans-serif', color: '#000', background: '#fff' }}>
-                {/* Page header */}
-                <div style={{ borderBottom: '1.5pt solid #000', paddingBottom: 6, marginBottom: 10 }}>
-                  <div style={{ fontSize: '13pt', fontWeight: 800, letterSpacing: '0.05em' }}>
-                    MEET PROGRAM — BULLPEN RUNNING ORDER
-                  </div>
-                  <div style={{ fontSize: '9pt', color: '#333', marginTop: 2 }}>
-                    {meet.name} · {meetDate}
-                    {meet.location ? ` · ${meet.location}` : ''}
-                  </div>
-                </div>
+        {/* Body: sidebar + preview */}
+        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
 
-                {eventsData.length === 0
-                  ? <p style={{ color: '#999', fontSize: '9pt' }}>No events with entries yet.</p>
-                  : <div style={{ columns: '2', columnGap: '16pt' }}>{content}</div>
-                }
-              </div>
+          {/* Left: draggable event order */}
+          <div className="no-print" style={{
+            width: 230, borderRight: '1px solid var(--border)', overflowY: 'auto',
+            padding: '10px 8px', flexShrink: 0, background: 'var(--bg-secondary)',
+          }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)',
+              letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 8, paddingLeft: 4 }}>
+              Event Order — drag to reorder
             </div>
-          )}
+            {loading
+              ? <div style={{ color: '#aaa', fontSize: 12, padding: 8 }}>Loading…</div>
+              : orderedEvents.map((ev, i) => {
+                const g = ev.gender === 'M' ? 'B' : ev.gender === 'F' ? 'G' : 'X'
+                const isDragging = dragIdx === i
+                const isOver     = dragOverIdx === i && dragIdx !== i
+                return (
+                  <div key={ev.id}
+                    draggable
+                    onDragStart={() => handleDragStart(i)}
+                    onDragOver={e => handleDragOver(e, i)}
+                    onDrop={e => handleDrop(e, i)}
+                    onDragEnd={handleDragEnd}
+                    style={{
+                      padding: '5px 8px', marginBottom: 3, borderRadius: 4,
+                      cursor: 'grab', userSelect: 'none',
+                      background: isOver ? 'var(--accent-glow)' : 'var(--bg-tertiary)',
+                      border: isOver ? '1px solid var(--accent)' : '1px solid var(--border)',
+                      opacity: isDragging ? 0.35 : 1,
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      transform: isOver ? 'translateY(-1px)' : 'none',
+                      transition: 'background 0.1s, border-color 0.1s, opacity 0.1s',
+                    }}>
+                    <span style={{ color: 'var(--text-muted)', fontSize: 11, lineHeight: 1 }}>⠿</span>
+                    <span style={{ fontWeight: 700, color: 'var(--accent)', fontSize: 10,
+                      minWidth: 18, textAlign: 'right' }}>{i + 1}</span>
+                    <span style={{ flex: 1, fontSize: 11, overflow: 'hidden',
+                      textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <span style={{ color: 'var(--text-muted)', marginRight: 3 }}>{g}</span>
+                      {ev.event_name}{ev.age_group ? ` ${ev.age_group}` : ''}
+                    </span>
+                  </div>
+                )
+              })
+            }
+          </div>
+
+          {/* Right: scrollable preview */}
+          <div className="print-sheet-scroll" style={{ flex: 1 }}>
+            {loading ? (
+              <div style={{ padding: 40, textAlign: 'center', color: '#aaa' }}>Loading…</div>
+            ) : (
+              <div ref={printRef}>
+                <div className="print-sheet" style={{ fontFamily: 'Arial, sans-serif', color: '#000', background: '#fff' }}>
+                  <div style={{ borderBottom: '1.5pt solid #000', paddingBottom: 6, marginBottom: 10 }}>
+                    <div style={{ fontSize: '13pt', fontWeight: 800, letterSpacing: '0.05em' }}>
+                      MEET PROGRAM — BULLPEN RUNNING ORDER
+                    </div>
+                    <div style={{ fontSize: '9pt', color: '#333', marginTop: 2 }}>
+                      {meet.name} · {meetDate}{meet.location ? ` · ${meet.location}` : ''}
+                    </div>
+                  </div>
+                  {orderedEvents.length === 0
+                    ? <p style={{ color: '#999', fontSize: '9pt' }}>No events with entries yet.</p>
+                    : <div style={{ columns: '2', columnGap: '16pt' }}>
+                        {orderedEvents.map((ev, i) => renderEvent(ev, i))}
+                      </div>
+                  }
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
       </div>
