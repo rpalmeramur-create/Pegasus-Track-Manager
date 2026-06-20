@@ -55,7 +55,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveResult:            (entryId, data)  => ipcRenderer.invoke('results:save', entryId, data),
   autoRank:              (meetEventId)    => ipcRenderer.invoke('results:autoRank',      meetEventId),
   advanceAthletes:       (data)           => ipcRenderer.invoke('meetEvents:advance',     data),
-  seedEvent:             (meetEventId, heatSize) => ipcRenderer.invoke('meets:seedEvent', meetEventId, heatSize),
+  seedEvent:             (meetEventId, heatSize, options) => ipcRenderer.invoke('meets:seedEvent', meetEventId, heatSize, options),
 
   // Parent Portal
   getMeetResults: () => ipcRenderer.invoke('portal:getMeetResults'),

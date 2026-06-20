@@ -979,6 +979,9 @@ function WorksheetTab({ meet, meetDetail }) {
   const [ranking,       setRanking]       = useState(false)
   const [actionMsg,     setActionMsg]     = useState('')
   const [heatSize,      setHeatSize]      = useState(8)
+  const [hurdleHeatSize, setHurdleHeatSize] = useState(8)
+  const [useFlights,    setUseFlights]    = useState(false)
+  const [seedingAll,    setSeedingAll]    = useState(false)
   const [showPrint,         setShowPrint]         = useState(false)
   const [showAwardLabels,   setShowAwardLabels]   = useState(false)
   const [relayLegs,         setRelayLegs]         = useState({})   // entryId → [{leg,athlete_id,first_name,last_name}]
@@ -988,6 +991,8 @@ function WorksheetTab({ meet, meetDetail }) {
 
   useEffect(() => {
     if (!selectedEvent) { setEventDetail(null); setResults({}); setRelayLegs({}); setExpandedLegs(null); return }
+    const cat = selectedEvent.category
+    setUseFlights(cat !== 'field' && cat !== 'combined')
     setLoading(true)
     setRelayLegs({})
     setExpandedLegs(null)
@@ -1067,14 +1072,31 @@ function WorksheetTab({ meet, meetDetail }) {
 
   const handleAutoSeed = async () => {
     setSeeding(true)
-    // Flush pending seed edits first
     await Promise.all(Object.keys(results).map(id => saveSeed(Number(id))))
-    await api.seedEvent(selectedEvent.id, heatSize)
+    const noFlights = isField && !useFlights
+    await api.seedEvent(selectedEvent.id, heatSize, { noFlights })
     const d = await api.getMeetEventEntries(selectedEvent.id)
     setEventDetail(d)
     setSeeding(false)
     setActionMsg('Seeded!')
     setTimeout(() => setActionMsg(''), 2000)
+  }
+
+  const handleSeedAllHurdles = async () => {
+    const hurdleEvents = meetDetail.events.filter(ev =>
+      /HURDLE/i.test(ev.event_name)
+    )
+    if (!hurdleEvents.length) return
+    setSeedingAll(true)
+    await Promise.all(hurdleEvents.map(ev => api.seedEvent(ev.id, hurdleHeatSize)))
+    // Reload current event detail if it's a hurdle
+    if (selectedEvent && /HURDLE/i.test(selectedEvent.event_name)) {
+      const d = await api.getMeetEventEntries(selectedEvent.id)
+      setEventDetail(d)
+    }
+    setSeedingAll(false)
+    setActionMsg(`Seeded ${hurdleEvents.length} hurdle event${hurdleEvents.length !== 1 ? 's' : ''}!`)
+    setTimeout(() => setActionMsg(''), 3000)
   }
 
   const handleAutoRank = async () => {
@@ -1115,6 +1137,26 @@ function WorksheetTab({ meet, meetDetail }) {
       {/* Left: event list */}
       <div className="meets-col-left">
         <div className="meets-col-header"><List size={13} /> Events</div>
+        {/* Hurdle bulk seeding */}
+        {(() => {
+          const hurdleCount = meetDetail.events.filter(ev => /HURDLE/i.test(ev.event_name)).length
+          return (
+            <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)',
+              display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Hurdles/heat:</span>
+              <input type="number" min={2} max={10} value={hurdleHeatSize}
+                onChange={e => setHurdleHeatSize(Math.max(2, Math.min(10, Number(e.target.value) || 8)))}
+                style={{ width: 38, padding: '2px 4px', fontSize: 11, borderRadius: 4,
+                  border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text)',
+                  textAlign: 'center' }} />
+              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 8px', whiteSpace: 'nowrap' }}
+                onClick={handleSeedAllHurdles} disabled={seedingAll || hurdleCount === 0}
+                title={hurdleCount === 0 ? 'No hurdle events in this meet' : `Seed all ${hurdleCount} hurdle event${hurdleCount !== 1 ? 's' : ''}`}>
+                <Shuffle size={11} /> {seedingAll ? 'Seeding…' : 'Seed All Hurdles'}
+              </button>
+            </div>
+          )
+        })()}
         {meetDetail.events.length === 0 ? (
           <div style={{ padding: '24px 16px', color: 'var(--text-muted)', fontSize: 13 }}>
             Add events first in the Events tab.
@@ -1159,7 +1201,13 @@ function WorksheetTab({ meet, meetDetail }) {
                   {' · '}{isField ? 'Field — highest mark wins' : 'Track — lowest time wins'}
                 </div>
               </div>
-              {!isField && (
+              {isField ? (
+                <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={useFlights} onChange={e => setUseFlights(e.target.checked)}
+                    style={{ accentColor: 'var(--acc)' }} />
+                  Use flights
+                </label>
+              ) : (
                 <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--text-muted)' }}>
                   Per heat:
                   <input type="number" min={2} max={10} value={heatSize}
@@ -1200,7 +1248,7 @@ function WorksheetTab({ meet, meetDetail }) {
                 <div className="worksheet-head">
                   <span className="ws-col-name">Athlete</span>
                   <span className="ws-col-seed">Seed</span>
-                  <span className="ws-col-pos">{isField ? 'Fl/Pos' : 'Ht/Ln'}</span>
+                  <span className="ws-col-pos">{isField ? (useFlights ? 'Fl/Pos' : 'Pos') : 'Ht/Ln'}</span>
                   {!isField && <span className="ws-col-mark">Time</span>}
                   {showWind && <span className="ws-col-wind">Wind</span>}
                   <span className="ws-col-toggle">DNS</span>

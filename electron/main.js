@@ -1101,7 +1101,7 @@ function registerMeetHandlers() {
     return { success: true }
   })
 
-  ipcMain.handle('meets:seedEvent', (_, meetEventId, heatSize) => {
+  ipcMain.handle('meets:seedEvent', (_, meetEventId, heatSize, options = {}) => {
     const ev = db.prepare(`
       SELECT me.*, e.category FROM meet_events me
       JOIN tf_events e ON me.tf_event_id = e.id WHERE me.id = ?
@@ -1145,7 +1145,11 @@ function registerMeetHandlers() {
 
     const updateEntry = db.prepare('UPDATE entries SET heat=?, lane=? WHERE id=?')
 
-    if (isField) {
+    if (isField && options.noFlights) {
+      db.transaction(() => {
+        ordered.forEach((e, i) => updateEntry.run(null, i + 1, e.id))
+      })()
+    } else if (isField) {
       db.transaction(() => {
         ordered.forEach((e, i) => updateEntry.run(Math.floor(i / HEAT_SIZE) + 1, (i % HEAT_SIZE) + 1, e.id))
       })()
