@@ -2161,6 +2161,7 @@ function PrintMeetProgramModal({ meet, meetDetail, onClose }) {
   const [loading,     setLoading]     = useState(true)
   const [eventOrder,  setEventOrder]  = useState([])   // ordered array of event IDs
   const [columns,     setColumns]     = useState(2)
+  const [showBib,     setShowBib]     = useState(true)
   const [dragIdx,     setDragIdx]     = useState(null)
   const [dragOverIdx, setDragOverIdx] = useState(null)
   const printRef = useRef(null)
@@ -2252,10 +2253,10 @@ function PrintMeetProgramModal({ meet, meetDetail, onClose }) {
         <span style={{ display: 'inline-block', width: 10, height: 10,
           border: '0.75pt solid #999', borderRadius: 2 }} />
       </td>
-      <td style={{ ...tdCtr, width: 22 }}>{isField ? (en.lane || '—') : (en.lane || '—')}</td>
-      <td style={{ ...tdCtr, width: 26, fontWeight: 600 }}>{en.athlete_number || '—'}</td>
+      <td style={{ ...tdCtr, width: 22 }}>{en.lane || '—'}</td>
+      {showBib && <td style={{ ...tdCtr, width: 26, fontWeight: 600 }}>{en.athlete_number || '—'}</td>}
       <td style={tdStyle}>{en.last_name || en.gname || '—'}{en.first_name ? `, ${en.first_name}` : ''}</td>
-      <td style={{ ...tdStyle, width: 80, color: '#555' }}>{en.team || en.gteam || '—'}</td>
+      <td style={{ ...tdStyle, color: '#555', whiteSpace: 'nowrap' }}>{en.team || en.gteam || '—'}</td>
       <td style={{ ...tdCtr, width: 48, fontFamily: 'Courier New, monospace', fontSize: '7.5pt', color: '#222' }}>
         {en.seed_mark || '—'}
       </td>
@@ -2280,9 +2281,9 @@ function PrintMeetProgramModal({ meet, meetDetail, onClose }) {
       <thead><tr>
         <th style={{ ...thStyle, width: 18, textAlign: 'center' }}>✓</th>
         <th style={{ ...thStyle, width: 22, textAlign: 'center' }}>{isField ? 'Pos' : 'Ln'}</th>
-        <th style={{ ...thStyle, width: 26, textAlign: 'center' }}>#</th>
+        {showBib && <th style={{ ...thStyle, width: 26, textAlign: 'center' }}>#</th>}
         <th style={thStyle}>Athlete</th>
-        <th style={{ ...thStyle, width: 80 }}>Team</th>
+        <th style={{ ...thStyle, width: '1%', whiteSpace: 'nowrap' }}>Team</th>
         <th style={{ ...thStyle, width: 48, textAlign: 'center' }}>Seed</th>
       </tr></thead>
     )
@@ -2358,6 +2359,11 @@ function PrintMeetProgramModal({ meet, meetDetail, onClose }) {
               </button>
             ))}
           </div>
+          <label className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, cursor: 'pointer', color: 'var(--text-muted)' }}>
+            <input type="checkbox" checked={showBib} onChange={e => setShowBib(e.target.checked)}
+              style={{ accentColor: 'var(--acc)' }} />
+            Bib #
+          </label>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
             <button className="btn btn-ghost" onClick={() => savePdfHtml(printRef, meet.name, 'Meet-Program')}>⬇ Save PDF</button>
             <button className="btn btn-primary" onClick={() => printSheetHtml(printRef)}>🖨 Print</button>
@@ -2544,7 +2550,7 @@ function PrintHeatSheetModal({ meet, meetDetail, onClose }) {
               <th style={{ width: 28 }}>{isField ? 'Pos' : 'Ln'}</th>
               {showBib  && <th style={{ width: 30 }}>#</th>}
               <th className="ps-th-name">Athlete</th>
-              {showTeam && <th style={{ width: 90, textAlign: 'left' }}>Team</th>}
+              {showTeam && <th style={{ width: '1%', whiteSpace: 'nowrap', textAlign: 'left' }}>Team</th>}
               {showSeed && <th className="ps-th-seed">Seed</th>}
               {isField ? (
                 <>
@@ -2570,7 +2576,7 @@ function PrintHeatSheetModal({ meet, meetDetail, onClose }) {
                     <td className="ps-td-place">{en.lane || '—'}</td>
                     {showBib  && <td style={{ textAlign: 'center', fontSize: '9pt' }}>{en.athlete_number ?? '—'}</td>}
                     <td className="ps-td-name">{fmtName(en.last_name, en.first_name)}</td>
-                    {showTeam && <td style={{ padding: '5px 6px', fontSize: '9pt', color: '#555' }}>{en.team || '—'}</td>}
+                    {showTeam && <td style={{ padding: '5px 6px', fontSize: '9pt', color: '#555', whiteSpace: 'nowrap' }}>{en.team || '—'}</td>}
                     {showSeed && <td className="ps-td-center">{en.seed_mark || '—'}</td>}
                     {isField
                       ? [0,1,2,3,4,5,6].map(n => <td key={n} className="hs-write-in" />)
@@ -2603,7 +2609,7 @@ function PrintHeatSheetModal({ meet, meetDetail, onClose }) {
           <tr>
             {showBib  && <th style={{ width: 30 }}>#</th>}
             <th className="ps-th-name">Athlete</th>
-            {showTeam && <th style={{ width: 90, textAlign: 'left' }}>Team</th>}
+            {showTeam && <th style={{ width: '1%', whiteSpace: 'nowrap', textAlign: 'left' }}>Team</th>}
             {showSeed && <th className="ps-th-seed">Seed</th>}
           </tr>
         </thead>
@@ -2612,7 +2618,7 @@ function PrintHeatSheetModal({ meet, meetDetail, onClose }) {
             <tr key={en.id} className={i % 2 === 1 ? 'ps-row-shade' : ''}>
               {showBib  && <td style={{ textAlign: 'center', fontSize: '9pt' }}>{en.athlete_number ?? '—'}</td>}
               <td className="ps-td-name">{fmtName(en.last_name, en.first_name)}</td>
-              {showTeam && <td style={{ padding: '5px 6px', fontSize: '9pt', color: '#555' }}>{en.team || '—'}</td>}
+              {showTeam && <td style={{ padding: '5px 6px', fontSize: '9pt', color: '#555', whiteSpace: 'nowrap' }}>{en.team || '—'}</td>}
               {showSeed && <td className="ps-td-center">{en.seed_mark || '—'}</td>}
             </tr>
           ))}
@@ -2962,6 +2968,7 @@ function LabelContent({ lbl, variant, includeMark, meetDateStr }) {
 // ─── Per-event Heat Sheet Modal ───────────────────────────
 function PrintEventHeatSheetModal({ meet, eventDetail, onClose }) {
   const printRef = useRef(null)
+  const [showBib, setShowBib] = useState(true)
   const isField  = eventDetail.category === 'field' || eventDetail.category === 'combined'
   const showWind = eventDetail.category === 'track'  || eventDetail.category === 'relay'
 
@@ -2996,7 +3003,12 @@ function PrintEventHeatSheetModal({ meet, eventDetail, onClose }) {
       <div className="print-preview-container">
         <div className="print-toolbar no-print">
           <span style={{ fontWeight: 600, fontSize: 14 }}>{eventDetail.event_name} — Heat Sheet</span>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, cursor: 'pointer', color: 'var(--text-muted)' }}>
+              <input type="checkbox" checked={showBib} onChange={e => setShowBib(e.target.checked)}
+                style={{ accentColor: 'var(--acc)' }} />
+              Bib #
+            </label>
             <button className="btn btn-ghost" onClick={() => savePdfHtml(printRef, meet.name, 'Event-Heat-Sheet')}>⬇ Save PDF</button>
             <button className="btn btn-primary" onClick={() => printSheetHtml(printRef)}>🖨 Print</button>
             <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={15} /></button>
@@ -3028,9 +3040,9 @@ function PrintEventHeatSheetModal({ meet, eventDetail, onClose }) {
                       <tr>
                         {!isField && <th style={{ width: 36 }}>Lane</th>}
                         {isField  && <th style={{ width: 36 }}>Pos</th>}
-                        <th style={{ width: 32 }}>#</th>
+                        {showBib  && <th style={{ width: 32 }}>#</th>}
                         <th>Athlete</th>
-                        <th>Team</th>
+                        <th style={{ width: '1%', whiteSpace: 'nowrap' }}>Team</th>
                         <th style={{ width: 70 }}>Seed</th>
                         <th style={{ width: 70 }}>{isField ? 'Mark' : 'Time'}</th>
                         {showWind && <th style={{ width: 50 }}>Wind</th>}
@@ -3041,9 +3053,9 @@ function PrintEventHeatSheetModal({ meet, eventDetail, onClose }) {
                       {rows.map((en, i) => (
                         <tr key={en.id ?? i}>
                           <td style={{ textAlign: 'center' }}>{en.lane ?? '—'}</td>
-                          <td style={{ textAlign: 'center' }}>{en.athlete_number ?? '—'}</td>
+                          {showBib && <td style={{ textAlign: 'center' }}>{en.athlete_number ?? '—'}</td>}
                           <td>{en.last_name}, {en.first_name}</td>
-                          <td>{en.team ?? '—'}</td>
+                          <td style={{ whiteSpace: 'nowrap' }}>{en.team ?? '—'}</td>
                           <td style={{ textAlign: 'right', fontFamily: 'monospace' }}>{en.seed_mark ?? ''}</td>
                           <td />
                           {showWind && <td />}
@@ -3060,9 +3072,9 @@ function PrintEventHeatSheetModal({ meet, eventDetail, onClose }) {
                   <table className="ps-table">
                     <thead>
                       <tr>
-                        <th style={{ width: 32 }}>#</th>
+                        {showBib && <th style={{ width: 32 }}>#</th>}
                         <th>Athlete</th>
-                        <th>Team</th>
+                        <th style={{ width: '1%', whiteSpace: 'nowrap' }}>Team</th>
                         <th style={{ width: 70 }}>Seed</th>
                         <th style={{ width: 70 }}>{isField ? 'Mark' : 'Time'}</th>
                         {showWind && <th style={{ width: 50 }}>Wind</th>}
@@ -3072,9 +3084,9 @@ function PrintEventHeatSheetModal({ meet, eventDetail, onClose }) {
                     <tbody>
                       {unseeded.map((en, i) => (
                         <tr key={en.id ?? i}>
-                          <td style={{ textAlign: 'center' }}>{en.athlete_number ?? '—'}</td>
+                          {showBib && <td style={{ textAlign: 'center' }}>{en.athlete_number ?? '—'}</td>}
                           <td>{en.last_name}, {en.first_name}</td>
-                          <td>{en.team ?? '—'}</td>
+                          <td style={{ whiteSpace: 'nowrap' }}>{en.team ?? '—'}</td>
                           <td style={{ textAlign: 'right', fontFamily: 'monospace' }}>{en.seed_mark ?? ''}</td>
                           <td />
                           {showWind && <td />}
