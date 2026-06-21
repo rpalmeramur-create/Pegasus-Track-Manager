@@ -76,8 +76,8 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "REPLACE_WITH_GITHUB_USERNAME",
-      "repo": "pegasus-track"
+      "owner": "rpalmeramur-create",
+      "repo": "Pegasus-Track-Manager"
     }
   }
 }
