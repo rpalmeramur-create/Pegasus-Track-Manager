@@ -1053,6 +1053,21 @@ function registerMeetHandlers() {
     return { success: true, is_pr: isPr }
   })
 
+  // Clear DNS/DNF/DQ flags for all entries in a meet event (fix bad imports)
+  ipcMain.handle('results:clearStatusFlags', (_, meetEventId) => {
+    const entries = db.prepare('SELECT id FROM entries WHERE meet_event_id=?').all(meetEventId)
+    const stmt = db.prepare(`
+      UPDATE results SET did_not_start=0, did_not_finish=0, disqualified=0
+      WHERE entry_id=? AND mark IS NULL
+    `)
+    let cleared = 0
+    for (const en of entries) {
+      const info = stmt.run(en.id)
+      cleared += info.changes
+    }
+    return { success: true, cleared }
+  })
+
   ipcMain.handle('results:autoRank', (_, meetEventId) => {
     const ev = db.prepare(`
       SELECT me.*, e.category FROM meet_events me
@@ -1812,6 +1827,10 @@ function registerImportHandlers() {
            ON CONFLICT(athlete_id,tf_event_id,indoor) DO UPDATE SET mark=excluded.mark,updated_at=datetime('now')`
         )
 
+        // If no entry in the file has a mark, this is a pre-meet entries file.
+        // Don't infer DNS from absent marks in that case — athletes just haven't raced yet.
+        const isResultsFile = entries.some(e => e.mark)
+
         let entriesAdded = 0, resultsAdded = 0, skippedNoEvent = 0, skippedNoAthlete = 0, skippedDupe = 0
         for (const en of entries) {
           const ev = meetEventMap.get(en.eventNum)
@@ -1823,9 +1842,13 @@ function registerImportHandlers() {
           const entryId = stmtEntry.run(ev.meid, athleteId).lastInsertRowid
           entriesAdded++
 
-          const isDNS = !en.mark || en.isDNS
-          stmtRes.run(entryId, en.mark || null, en.wind || null, en.place || null, isDNS ? 1 : 0)
-          resultsAdded++
+          // Only insert a result row when there is actual result data to record.
+          // For entries-only imports, skip creating result rows so athletes remain editable.
+          const isDNS = isResultsFile && en.isDNS
+          if (en.mark || isDNS || en.isDQ || en.place) {
+            stmtRes.run(entryId, en.mark || null, en.wind || null, en.place || null, isDNS ? 1 : 0)
+            resultsAdded++
+          }
 
           if (en.mark && !isDNS) {
             const newVal = parseMark(en.mark, ev.tfEvent.category)

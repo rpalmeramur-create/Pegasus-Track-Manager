@@ -29,6 +29,7 @@
     "ws": "^8.21.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.0",
     "@vitejs/plugin-react": "^4.3.1",
     "electron": "^33.4.11",
     "electron-builder": "^25.1.8",

@@ -223,7 +223,8 @@ const FALLBACK = {
     }
     return Promise.resolve(best ?? _db.prs[`${athleteId}_${tfEventId}`] ?? null)
   },
-  autoRank:  () => Promise.resolve({ success: true }),
+  autoRank:          () => Promise.resolve({ success: true }),
+  clearStatusFlags:  () => Promise.resolve({ success: true, cleared: 0 }),
   seedEvent: () => Promise.resolve({ success: true }),
   getAthletes: athleteApi.getAthletes,
   getSeasons:  () => Promise.resolve([]),
@@ -1117,6 +1118,27 @@ function WorksheetTab({ meet, meetDetail }) {
     setTimeout(() => setActionMsg(''), 2000)
   }
 
+  const handleClearStatus = async () => {
+    await api.clearStatusFlags(selectedEvent.id)
+    const d = await api.getMeetEventEntries(selectedEvent.id)
+    setEventDetail(d)
+    const init = {}
+    d.entries.forEach(en => {
+      init[en.id] = {
+        seed_mark:      en.seed_mark      ?? '',
+        mark:           en.mark           ?? '',
+        wind:           en.wind           ?? '',
+        did_not_start:  !!en.did_not_start,
+        did_not_finish: !!en.did_not_finish,
+        disqualified:   !!en.disqualified,
+        place:          en.place          ?? null,
+        is_pr:          !!en.is_pr,
+        attempts_json:  en.attempts_json  ?? null,
+      }
+    })
+    setResults(init)
+  }
+
   const isField  = eventDetail?.category === 'field' || eventDetail?.category === 'combined'
   const showWind = eventDetail?.category === 'track'  || eventDetail?.category === 'relay'
 
@@ -1235,6 +1257,13 @@ function WorksheetTab({ meet, meetDetail }) {
                 <RefreshCw size={12} /> {ranking ? 'Ranking…' : actionMsg || 'Auto-Rank'}
               </button>
               {eventDetail?.entries?.length > 0 && (<>
+                {eventDetail.entries.some(en => (en.did_not_start || en.did_not_finish || en.disqualified) && !en.mark) && (
+                  <button className="btn btn-ghost" style={{ fontSize: 11, padding: '5px 10px', color: 'var(--warning, #f59e0b)' }}
+                    onClick={handleClearStatus}
+                    title="Clear DNS/DNF/DQ flags for athletes with no mark (fixes bad imports)">
+                    ✕ Clear DNS/DNF/DQ
+                  </button>
+                )}
                 <button className="btn btn-ghost" style={{ fontSize: 11, padding: '5px 10px' }}
                   onClick={() => setShowAwardLabels(true)} title="Print award labels for this event">
                   🏷 Labels
