@@ -506,6 +506,8 @@ function UpdatesSection() {
 function DataMaintenanceSection() {
   const [status, setStatus] = useState('idle')
   const [msg, setMsg]       = useState('')
+  const [backupStatus, setBackupStatus] = useState('idle')
+  const [backupMsg,    setBackupMsg]    = useState('')
 
   const handleDedup = async () => {
     if (!window.electronAPI?.deduplicateAthletes) {
@@ -532,21 +534,74 @@ function DataMaintenanceSection() {
     }
   }
 
+  const handleBackup = async () => {
+    if (!window.electronAPI?.backupDb) {
+      setBackupMsg('Requires the desktop app.')
+      setBackupStatus('error')
+      return
+    }
+    setBackupStatus('working')
+    setBackupMsg('')
+    const res = await window.electronAPI.backupDb()
+    if (res.canceled) {
+      setBackupStatus('idle')
+    } else if (res.success) {
+      setBackupMsg(`Backup saved to: ${res.filePath}`)
+      setBackupStatus('ok')
+    } else {
+      setBackupMsg(res.error || 'Backup failed.')
+      setBackupStatus('error')
+    }
+  }
+
+  const handleRestore = async () => {
+    if (!window.electronAPI?.restoreDb) {
+      setBackupMsg('Requires the desktop app.')
+      setBackupStatus('error')
+      return
+    }
+    const confirmed = window.confirm(
+      'Restore Database\n\n' +
+      'This will REPLACE all current data with the selected backup file.\n' +
+      'The app will restart automatically after restoring.\n\n' +
+      'Proceed?'
+    )
+    if (!confirmed) return
+    setBackupStatus('working')
+    setBackupMsg('Restoring — app will restart…')
+    await window.electronAPI.restoreDb()
+  }
+
   return (
     <div className="settings-section">
       <div className="settings-section-header">
         <div>
           <div className="settings-section-title">Data Maintenance</div>
           <div className="settings-section-sub">
-            Clean up duplicate athletes created during imports.
+            Back up your data or restore from a backup to transfer to a new PC.
           </div>
         </div>
       </div>
       <div className="settings-fields">
-        {msg && <div className={status === 'ok' ? 'settings-success' : 'settings-error'}>{msg}</div>}
-        <button className="btn btn-ghost" onClick={handleDedup} disabled={status === 'working'}>
-          {status === 'working' ? 'Scanning…' : 'Deduplicate Athletes'}
-        </button>
+        {backupMsg && (
+          <div className={backupStatus === 'ok' ? 'settings-success' : backupStatus === 'error' ? 'settings-error' : ''}>
+            {backupMsg}
+          </div>
+        )}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-primary" onClick={handleBackup} disabled={backupStatus === 'working'}>
+            {backupStatus === 'working' ? 'Saving…' : 'Backup Database'}
+          </button>
+          <button className="btn btn-ghost" onClick={handleRestore} disabled={backupStatus === 'working'}>
+            Restore from Backup
+          </button>
+        </div>
+        <div style={{ marginTop: 16 }}>
+          {msg && <div className={status === 'ok' ? 'settings-success' : 'settings-error'} style={{ marginBottom: 8 }}>{msg}</div>}
+          <button className="btn btn-ghost" onClick={handleDedup} disabled={status === 'working'}>
+            {status === 'working' ? 'Scanning…' : 'Deduplicate Athletes'}
+          </button>
+        </div>
       </div>
     </div>
   )

@@ -37,6 +37,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Settings
   getSettings:  ()     => ipcRenderer.invoke('settings:get'),
   saveSettings: (data) => ipcRenderer.invoke('settings:save', data),
+  backupDb:     ()     => ipcRenderer.invoke('db:backup'),
+  restoreDb:    ()     => ipcRenderer.invoke('db:restore'),
 
   // Meets
   getMeets:              ()               => ipcRenderer.invoke('meets:getAll'),

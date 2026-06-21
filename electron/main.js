@@ -602,6 +602,34 @@ function registerSettingsHandlers() {
     }
   })
 
+  ipcMain.handle('db:backup', async () => {
+    const { filePath, canceled } = await dialog.showSaveDialog({
+      title: 'Save Pegasus Track Backup',
+      defaultPath: path.join(app.getPath('documents'), `pegasus-backup-${new Date().toISOString().slice(0,10)}.db`),
+      filters: [{ name: 'Pegasus Backup', extensions: ['db'] }],
+    })
+    if (canceled || !filePath) return { canceled: true }
+    // Checkpoint WAL so the backup file is self-contained
+    db.pragma('wal_checkpoint(TRUNCATE)')
+    fs.copyFileSync(path.join(app.getPath('userData'), 'pegasus-track.db'), filePath)
+    return { success: true, filePath }
+  })
+
+  ipcMain.handle('db:restore', async () => {
+    const { filePaths, canceled } = await dialog.showOpenDialog({
+      title: 'Restore Pegasus Track Backup',
+      filters: [{ name: 'Pegasus Backup', extensions: ['db'] }],
+      properties: ['openFile'],
+    })
+    if (canceled || !filePaths.length) return { canceled: true }
+    const dest = path.join(app.getPath('userData'), 'pegasus-track.db')
+    db.close()
+    fs.copyFileSync(filePaths[0], dest)
+    app.relaunch()
+    app.exit(0)
+    return { success: true }
+  })
+
   ipcMain.handle('settings:save', (_, data) => {
     const updates = {
       supabaseUrl:     data.supabaseUrl,
