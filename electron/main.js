@@ -132,6 +132,7 @@ function initDatabase() {
 // ═══════════════════════════════════════════════
 
 function createWindow() {
+  const iconPath = path.join(__dirname, '../assets/icon.ico')
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -143,6 +144,7 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: false,
     },
+    icon: fs.existsSync(iconPath) ? iconPath : undefined,
     backgroundColor: '#08091a',
     show: false,
   })

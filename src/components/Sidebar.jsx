@@ -38,8 +38,8 @@ export default function Sidebar() {
     <aside className="sidebar">
       {/* Logo */}
       <div className="sidebar-logo">
-        <div className="sidebar-logo-icon">
-          <AppLogo size={22} />
+        <div className="sidebar-logo-icon" style={{ background: '#fff', border: '1px solid rgba(0,0,0,0.12)', padding: 2 }}>
+          <AppLogo size={32} />
         </div>
         <div>
           <div className="sidebar-logo-name">{org.toUpperCase()}</div>
