@@ -26,7 +26,7 @@
 ╚══════════════════════════════════════════════════════════════════════════════╝
 */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   LayoutDashboard, Users, Calendar, TrendingUp, Settings, Zap,
   Search, UserPlus, Edit2, Trash2, X, Plus, ArrowLeft,
@@ -184,15 +184,6 @@ textarea.inp{resize:vertical;min-height:56px}
 @keyframes fi{from{opacity:0}to{opacity:1}}
 @keyframes su{from{transform:translateY(12px);opacity:0}to{transform:translateY(0);opacity:1}}
 @keyframes sp{to{transform:rotate(360deg)}}
-.print-paper{position:fixed;top:0;left:-99999px;width:8.5in;background:white;z-index:-1}
-@media print{
-  body *{visibility:hidden!important}
-  .print-paper,.print-paper *{visibility:visible!important}
-  .print-paper{left:0!important;top:0!important;width:100%!important;padding:0!important;position:fixed!important}
-  @page{size:letter portrait;margin:.5in}
-  @page landscape{size:letter landscape;margin:.4in}
-  .pbreak{page-break-before:always!important}
-}
 .pv-wrap{position:fixed;inset:0;z-index:3000;display:flex;flex-direction:column;background:#1a1a2e}
 .pv-bar{display:flex;align-items:center;gap:12px;padding:12px 20px;background:rgba(0,0,0,.5);border-bottom:1px solid rgba(255,255,255,.1);flex-shrink:0}
 .pv-scroll{flex:1;overflow-y:auto;padding:28px;background:#2a2a3e;display:flex;justify-content:center}
@@ -1653,10 +1644,56 @@ function PrintSheetContent(props) {
 }
 
 /* ─── PRINT REPORT MODAL ───────────────────────────────────────────────────── */
+var PRINT_CSS = `
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Times New Roman',Times,serif;color:#111;background:white}
+  .ps-hdr{border-bottom:3px double #333;padding-bottom:8px;margin-bottom:12px}
+  .ps-club{font-family:Arial,sans-serif;font-size:19pt;font-weight:900;letter-spacing:3px;text-transform:uppercase}
+  .ps-meetinfo{font-size:9pt;color:#444;margin-top:3px;display:flex;gap:24px;flex-wrap:wrap}
+  .ps-evtitle{font-size:15pt;font-weight:700;margin:10px 0 2px;font-family:Arial,sans-serif;text-transform:uppercase;letter-spacing:1px}
+  .ps-evmeta{font-size:9.5pt;color:#444;margin-bottom:12px;display:flex;gap:16px;flex-wrap:wrap}
+  .ps-ht-hdr{font-family:Arial,sans-serif;font-size:12pt;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;border-bottom:1.5px solid #555;padding-bottom:4px;margin:14px 0 6px;display:flex;justify-content:space-between;align-items:baseline}
+  .ps-ht-hdr span{font-size:9pt;font-weight:400;font-family:'Times New Roman',serif;letter-spacing:0}
+  .ps-tbl{width:100%;border-collapse:collapse;font-size:10pt}
+  .ps-tbl th{background:#e8e8e8;border:1px solid #888;padding:4px 6px;text-align:center;font-family:Arial,sans-serif;font-size:8pt;font-weight:700;text-transform:uppercase;letter-spacing:.5px}
+  .ps-tbl th.left{text-align:left}
+  .ps-tbl td{border:1px solid #aaa;padding:5px 6px;height:26px;font-size:10pt;vertical-align:middle}
+  .ps-tbl td.wi{background:#fffde7}
+  .ps-tbl td.num{text-align:center;font-family:Arial,sans-serif;font-weight:700;font-size:13pt}
+  .ps-tbl td.seed{text-align:center;font-family:'Courier New',monospace;font-size:10pt;color:#444}
+  .ps-footer{margin-top:20px;border-top:1.5px solid #333;padding-top:10px;font-size:9pt;font-family:Arial,sans-serif}
+  .ps-sig-row{display:flex;gap:32px;margin-bottom:10px;flex-wrap:wrap}
+  .ps-sig{flex:1;min-width:200px}
+  .ps-sig-lbl{font-size:8pt;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#333}
+  .ps-sig-line{border-bottom:1px solid #333;margin-top:14px;width:100%}
+  .ps-note{font-size:8pt;color:#666;margin-top:8px;font-style:italic}
+  .pbreak{page-break-before:always}
+  @page{size:letter portrait;margin:.5in}
+`;
+
+async function handlePrint(contentEl, isLandscape) {
+  if (!contentEl) return;
+  var pad = isLandscape ? '.4in' : '.5in';
+  var html = '<div style="padding:' + pad + ';box-sizing:border-box">' + contentEl.innerHTML + '</div>';
+  if (window.electronAPI && window.electronAPI.printSheet) {
+    await window.electronAPI.printSheet({ html: html, css: PRINT_CSS, landscape: isLandscape });
+  } else {
+    var pageRule = isLandscape ? '@page{size:letter landscape;margin:.4in}' : '@page{size:letter portrait;margin:.5in}';
+    var win = window.open('', '_blank');
+    if (!win) return;
+    win.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><style>' + PRINT_CSS + pageRule + '</style></head><body>' + html + '</body></html>');
+    win.document.close();
+    win.focus();
+    win.print();
+    win.close();
+  }
+}
+
 function PrintReportModal(props) {
   var ev = props.ev, entries = props.entries, results = props.results;
   var athletes = props.athletes, meet = props.meet, onClose = props.onClose;
   var isF = isFieldEvent(ev.cat);
+  var printRef = useRef(null);
   return (
     <>
       <div className="pv-wrap">
@@ -1665,7 +1702,7 @@ function PrintReportModal(props) {
           <div style={{flex:1,fontFamily:'var(--fd)',fontSize:14,fontWeight:600,letterSpacing:'.06em',textAlign:'center'}}>
             PRINT PREVIEW — {ev.name} {isF ? '(Landscape)' : '(Portrait)'}
           </div>
-          <button className="btn bp" onClick={function() { window.print(); }}><Download size={13}/>Print / Save PDF</button>
+          <button className="btn bp" onClick={function() { handlePrint(printRef.current, isF); }}><Download size={13}/>Print / Save PDF</button>
         </div>
         <div className="pv-scroll">
           <div className={'ps-page' + (isF ? ' landscape' : '')}>
@@ -1673,10 +1710,8 @@ function PrintReportModal(props) {
           </div>
         </div>
       </div>
-      <div className="print-paper">
-        <div style={{padding: isF ? '.4in' : '.5in', fontFamily:'Times New Roman,Times,serif'}}>
-          <PrintSheetContent ev={ev} entries={entries} results={results} athletes={athletes} meet={meet}/>
-        </div>
+      <div ref={printRef} style={{display:'none'}}>
+        <PrintSheetContent ev={ev} entries={entries} results={results} athletes={athletes} meet={meet}/>
       </div>
     </>
   );

@@ -1,0 +1,33 @@
+directories:
+  output: release
+  buildResources: assets
+appId: com.pegasustrack.app
+productName: Pegasus Track
+copyright: Copyright © 2026 Pegasus Track
+npmRebuild: false
+files:
+  - filter:
+      - dist/**/*
+      - electron/**/*
+      - package.json
+asarUnpack:
+  - '**/better-sqlite3/**/*'
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: ${productName} Setup ${version}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Pegasus Track
+  deleteAppDataOnUninstall: false
+publish:
+  provider: github
+  owner: REPLACE_WITH_GITHUB_USERNAME
+  repo: pegasus-track
+electronVersion: 33.4.11

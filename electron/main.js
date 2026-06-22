@@ -2308,15 +2308,20 @@ body { margin: 0; padding: 0; }
   })
 
   // ── Print letter-size sheet (heat sheets / results) ──
-  ipcMain.handle('print:sheet', async (_, { html, css }) => {
+  ipcMain.handle('print:sheet', async (_, { html, css, landscape }) => {
     const os = require('os')
     const { spawn } = require('child_process')
     const { readSettings } = require('./settings')
     const sheetPrinter = readSettings().sheetPrinter || ''
 
+    const pageW = landscape ? '11in' : '8.5in'
+    const pageH = landscape ? '8.5in' : '11in'
+    const winW  = landscape ? 1056 : 816
+    const winH  = landscape ? 816  : 1100
+
     const fullHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
 ${css}
-@page { size: 8.5in 11in; margin: 0; }
+@page { size: ${pageW} ${pageH}; margin: 0; }
 body  { margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; }
 * { visibility: visible !important; }
 </style></head><body>${html}</body></html>`
@@ -2326,8 +2331,8 @@ body  { margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; }
 
     const printWin = new BrowserWindow({
       show: false,
-      width: 816,
-      height: 1100,
+      width: winW,
+      height: winH,
       webPreferences: { nodeIntegration: false, contextIsolation: true },
     })
 
@@ -2336,11 +2341,26 @@ body  { margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; }
       // Allow CSS layout to settle after DOM load
       await new Promise(r => setTimeout(r, 400))
 
+      if (!sheetPrinter) {
+        // No printer configured: show the Windows print dialog
+        printWin.show()
+        printWin.focus()
+        return new Promise(resolve => {
+          printWin.webContents.print({ silent: false, printBackground: true }, (success, reason) => {
+            if (!printWin.isDestroyed()) printWin.close()
+            try { fs.unlinkSync(tmpHtml) } catch {}
+            resolve({ success, reason: reason ?? null })
+          })
+        })
+      }
+
       // Generate PDF — works reliably on hidden windows unlike webContents.print()
       const pdfData = await printWin.webContents.printToPDF({
         printBackground: true,
         preferCSSPageSize: true,
-        pageSize: 'Letter',
+        pageSize: landscape
+          ? { width: 279400, height: 215900 }  // 11in × 8.5in in microns
+          : 'Letter',
       })
       printWin.close()
       try { fs.unlinkSync(tmpHtml) } catch {}
@@ -2348,23 +2368,16 @@ body  { margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; }
       const tmpPdf = path.join(os.tmpdir(), `pegasus-sheet-${Date.now()}.pdf`)
       fs.writeFileSync(tmpPdf, pdfData)
 
-      if (sheetPrinter) {
-        // Send PDF to the configured printer via Windows PrintTo verb.
-        // Uses the system default PDF viewer (Edge on Win11) for silent printing.
-        const safe = (s) => s.replace(/'/g, "''")
-        const ps = spawn('powershell.exe', [
-          '-NonInteractive', '-WindowStyle', 'Hidden', '-Command',
-          `Start-Process -FilePath '${safe(tmpPdf)}' -Verb PrintTo -ArgumentList '${safe(sheetPrinter)}'`,
-        ])
-        ps.once('error', () => {}) // ignore spawn errors — fire-and-forget
-        // Give the PDF viewer 30 s to start spooling before we delete the temp file
-        setTimeout(() => { try { fs.unlinkSync(tmpPdf) } catch {} }, 30000)
-        return { success: true, reason: null }
-      }
-
-      // No printer configured: open the PDF in the system viewer
-      const openErr = await shell.openPath(tmpPdf)
-      return { success: !openErr, reason: openErr || null }
+      // Send PDF to the configured printer via Windows PrintTo verb.
+      const safe = (s) => s.replace(/'/g, "''")
+      const ps = spawn('powershell.exe', [
+        '-NonInteractive', '-WindowStyle', 'Hidden', '-Command',
+        `Start-Process -FilePath '${safe(tmpPdf)}' -Verb PrintTo -ArgumentList '${safe(sheetPrinter)}'`,
+      ])
+      ps.once('error', () => {}) // ignore spawn errors — fire-and-forget
+      // Give the PDF viewer 30 s to start spooling before we delete the temp file
+      setTimeout(() => { try { fs.unlinkSync(tmpPdf) } catch {} }, 30000)
+      return { success: true, reason: null }
     } catch (e) {
       if (!printWin.isDestroyed()) printWin.close()
       try { fs.unlinkSync(tmpHtml) } catch {}
