@@ -1470,11 +1470,38 @@ function _classifyTCLEvent(name) {
   return 'track'
 }
 
-function _normEventName(name) {
-  const n = name.toLowerCase().trim()
-  if (n === 'discus throw') return 'discus'
-  if (n === 'hammer throw') return 'hammer'
-  if (n === 'javelin throw') return 'javelin'
+function _normEventName(raw) {
+  const n = (raw || '').toLowerCase().trim()
+
+  // Relay: compact "4x100" / "4 x 100 meter relay" → canonical catalog name
+  const relayLeg = { 100: '4 x 100 meter relay', 200: '4 x 200 meter relay',
+                     400: '4 x 400 meter relay', 800: '4 x 800 meter relay' }
+  const m4x = n.match(/^4\s*[x×]\s*(\d+)\s*(?:m(?:eter)?\s*)?(?:relay)?$/)
+  if (m4x) { const r = relayLeg[parseInt(m4x[1])]; if (r) return r }
+  // "400 meter relay" (total distance) → "4 x 100 meter relay"
+  const mTot = n.match(/^(\d+)\s*(?:m(?:eter)?\s+)?relay$/)
+  if (mTot) { const leg = parseInt(mTot[1]) / 4; const r = relayLeg[leg]; if (r) return r }
+  if (/sprint\s*medley/.test(n)) return 'sprint medley relay'
+  if (/distance\s*medley/.test(n)) return 'distance medley relay'
+
+  // Throws — with or without "throw" suffix
+  if (/^discus(\s+throw)?$/.test(n)) return 'discus'
+  if (/^hammer(\s+throw)?$/.test(n)) return 'hammer'
+  if (/^javelin(\s+throw)?$/.test(n)) return 'javelin'
+  if (/turbo.*jav|jav.*turbo/.test(n)) return 'turbo javelin'
+  if (/^shot(\s+put)?$/.test(n)) return 'shot put'
+  if (/softball(\s+throw)?/.test(n)) return 'softball throw'
+
+  // Standing Long Jump → Long Jump (youth variant, no separate catalog entry)
+  if (/standing.*long.*jump|long.*jump.*standing/.test(n)) return 'long jump'
+
+  // Mile variations
+  if (/^(?:1\s+)?mile(?:\s+run)?$/.test(n)) return 'mile run'
+
+  // Steeplechase short forms
+  if (/^2000\s*m(?:eters?)?\s*(?:s(?:teeple(?:chase)?)?)?$/.test(n)) return '2000m steeplechase'
+  if (/^3000\s*m(?:eters?)?\s*(?:s(?:teeple(?:chase)?)?)?$/.test(n)) return '3000m steeplechase'
+
   return n
 }
 
@@ -1556,16 +1583,14 @@ function _htekEventName(ev) {
     const note = (ev.event_note || '').trim()
     if (note) return note.charAt(0).toUpperCase() + note.slice(1).toLowerCase()
     const s = ev.Event_stroke
-    if (s === 'M') return 'Standing Long Jump'
-    if (s === 'R') return 'Long Jump'
+    if (s === 'M' || s === 'L' || s === 'R') return 'Long Jump'   // M=standing LJ, L/R=running LJ
+    if (s === 'T') return 'Triple Jump'   // T=Triple Jump (Hy-Tek standard code)
     if (s === 'K' || s === 'V') return 'High Jump'
     if (s === 'P') return 'Pole Vault'
-    if (s === 'T') return 'Throw'
     if (s === 'S') return 'Shot Put'
     if (s === 'D') return 'Discus'
     if (s === 'J') return 'Javelin'
     if (s === 'H') return 'Hammer'
-    // 'O' = generic throw — use age to distinguish shot put vs discus
     if (s === 'O') return (ev.Low_age || 0) >= 11 ? 'Discus' : 'Shot Put'
     return 'Field Event'
   }
@@ -1578,7 +1603,12 @@ function _htekEventName(ev) {
     if (dist >= 800 || s === 'B' || s === 'D' || s === 'C') return `${dist} Meter Run`
     return `${dist} Meter Dash`
   }
-  if (ev.Ind_rel === 'R') return `${ev.Event_dist} Meter Relay`
+  if (ev.Ind_rel === 'R') {
+    // Convert total relay distance to canonical "4 x N Meter Relay" name
+    const legMap = { 400: '4 x 100 Meter Relay', 800: '4 x 200 Meter Relay',
+                     1600: '4 x 400 Meter Relay', 3200: '4 x 800 Meter Relay' }
+    return legMap[ev.Event_dist] || `${ev.Event_dist} Meter Relay`
+  }
   return 'Unknown Event'
 }
 
@@ -1981,17 +2011,26 @@ function registerImportHandlers() {
       const tfEventRows = db.prepare('SELECT id, name, category, measurement_unit FROM tf_events').all()
       const tfByName = new Map(tfEventRows.map(e => [e.name.toLowerCase(), e]))
 
+      // Build a normalized lookup map so _normEventName variants also find catalog entries
+      const tfByNormMDB = new Map()
+      for (const e of tfEventRows) {
+        tfByNormMDB.set(e.name.toLowerCase(), e)
+        tfByNormMDB.set(_normEventName(e.name.toLowerCase()), e)
+      }
+
       const importFn = db.transaction(() => {
         function getOrCreateTfEvent(name, category, measurementUnit) {
           const key = name.toLowerCase()
-          if (tfByName.has(key)) return tfByName.get(key)
+          // 1. exact match, 2. normalized match — avoids creating custom events for known variants
+          const found = tfByNormMDB.get(key) ?? tfByNormMDB.get(_normEventName(key))
+          if (found) return found
           const abbr = name.replace(/\s+/g, '').slice(0, 8)
           const r = db.prepare(
             `INSERT INTO tf_events (name, abbreviation, category, measurement_unit, is_custom, sort_order)
              VALUES (?, ?, ?, ?, 1, 999)`
           ).run(name, abbr, category, measurementUnit)
           const newEvt = { id: r.lastInsertRowid, name, category, measurement_unit: measurementUnit }
-          tfByName.set(key, newEvt)
+          tfByNormMDB.set(key, newEvt)
           return newEvt
         }
 
