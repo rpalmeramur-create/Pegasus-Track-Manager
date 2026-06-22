@@ -10,6 +10,34 @@ const isDev = !app.isPackaged
 let db
 
 // ─── Shared mark parser (track: seconds; field: inches) ───
+// Ceiling a track seed mark to the nearest tenth of a second.
+// Field/combined marks (feet-inches or meters) are returned unchanged.
+function ceilTrackSeed(str, category) {
+  if (!str) return str
+  if (category === 'field' || category === 'combined') return str
+  const s = String(str).trim()
+  if (!s) return str
+  const hasColon = s.includes(':')
+  let secs
+  if (hasColon) {
+    const parts = s.split(':')
+    secs = parts.length === 2
+      ? parseFloat(parts[0]) * 60 + parseFloat(parts[1])
+      : parseFloat(parts[0]) * 3600 + parseFloat(parts[1]) * 60 + parseFloat(parts[2])
+  } else {
+    secs = parseFloat(s)
+  }
+  if (!secs || isNaN(secs) || secs <= 0) return str
+  // Round to ms first to eliminate float drift, then ceiling to tenth
+  const ceiled = Math.ceil(Math.round(secs * 1000) / 100) / 10
+  if (hasColon || ceiled >= 60) {
+    const m = Math.floor(ceiled / 60)
+    const r = ceiled - m * 60
+    return `${m}:${r.toFixed(1).padStart(4, '0')}`
+  }
+  return ceiled.toFixed(1)
+}
+
 function parseMark(str, category) {
   if (!str) return null
   const s = String(str).trim()
@@ -932,8 +960,9 @@ function registerMeetHandlers() {
         for (const entry of needsSeed) {
           const best = bestByAthlete[entry.athlete_id]
           if (best) {
-            updateSeed.run(best.mark, entry.id)
-            entry.seed_mark = best.mark
+            const seeded = ceilTrackSeed(best.mark, ev.category)
+            updateSeed.run(seeded, entry.id)
+            entry.seed_mark = seeded
           }
         }
       }
@@ -949,13 +978,14 @@ function registerMeetHandlers() {
       'SELECT id FROM entries WHERE meet_event_id=? AND athlete_id=?'
     ).get(data.meet_event_id, data.athlete_id)
     if (dupe) return { error: 'Athlete already entered in this event.' }
+    const evCat = db.prepare('SELECT e.category FROM meet_events me JOIN tf_events e ON me.tf_event_id = e.id WHERE me.id = ?').get(data.meet_event_id)
     const r = db.prepare(`
       INSERT INTO entries (meet_event_id, athlete_id, seed_mark)
       VALUES (@meet_event_id, @athlete_id, @seed_mark)
     `).run({
       meet_event_id: data.meet_event_id,
       athlete_id: data.athlete_id,
-      seed_mark: data.seed_mark || null,
+      seed_mark: ceilTrackSeed(data.seed_mark, evCat?.category) || null,
     })
     return db.prepare(`
       SELECT en.*,
@@ -1002,7 +1032,9 @@ function registerMeetHandlers() {
   })
 
   ipcMain.handle('entries:updateSeed', (_, id, seedMark) => {
-    db.prepare('UPDATE entries SET seed_mark=? WHERE id=?').run(seedMark || null, id)
+    const row = db.prepare('SELECT e.category FROM entries en JOIN meet_events me ON me.id = en.meet_event_id JOIN tf_events e ON e.id = me.tf_event_id WHERE en.id = ?').get(id)
+    const mark = ceilTrackSeed(seedMark, row?.category)
+    db.prepare('UPDATE entries SET seed_mark=? WHERE id=?').run(mark || null, id)
     return { success: true }
   })
 
