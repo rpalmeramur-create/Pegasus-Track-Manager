@@ -2300,21 +2300,26 @@ function PrintMeetProgramModal({ meet, meetDetail, onClose }) {
     const isField = category === 'field' || category === 'combined'
     const parseSeedVal = (mark) => {
       if (!mark) return null
-      if (mark.includes(':')) { const [m, s] = mark.split(':'); return parseFloat(m) * 60 + parseFloat(s) }
-      if (mark.includes('-')) { const [ft, inch] = mark.split('-'); return parseFloat(ft) * 12 + parseFloat(inch) }
-      return parseFloat(mark) ?? null
+      const v = mark.includes(':')
+        ? (() => { const [m, s] = mark.split(':'); return parseFloat(m) * 60 + parseFloat(s) })()
+        : mark.includes('-')
+          ? (() => { const [ft, inch] = mark.split('-'); return parseFloat(ft) * 12 + parseFloat(inch || 0) })()
+          : parseFloat(mark)
+      return isNaN(v) ? null : v
     }
+    // Use seed_mark first; fall back to actual result mark so TCL-imported meets
+    // (where seed_mark is always NULL) still sort correctly by real performance.
+    const getBestMark = (en) => parseSeedVal(en.seed_mark) ?? parseSeedVal(en.mark)
     const heats = Object.entries(map)
       .sort(([, aRows], [, bRows]) => {
-        // Sort heats by their best mark so slowest/shortest heat runs first,
-        // regardless of how heat numbers were originally assigned.
-        const aVals = aRows.map(r => parseSeedVal(r.seed_mark)).filter(v => v != null)
-        const bVals = bRows.map(r => parseSeedVal(r.seed_mark)).filter(v => v != null)
+        const aVals = aRows.map(getBestMark).filter(v => v != null)
+        const bVals = bRows.map(getBestMark).filter(v => v != null)
         if (!aVals.length && !bVals.length) return 0
         if (!aVals.length) return 1
         if (!bVals.length) return -1
         const aBest = isField ? Math.max(...aVals) : Math.min(...aVals)
         const bBest = isField ? Math.max(...bVals) : Math.min(...bVals)
+        // Slowest/shortest heat first: for track higher time = slower; for field lower distance = worse
         return isField ? aBest - bBest : bBest - aBest
       })
       .map(([h, rows]) => ({ heat: Number(h), rows: rows.sort((a, b) => (a.lane ?? 99) - (b.lane ?? 99)) }))
