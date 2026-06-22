@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react'
-import { Search, UserPlus, Edit2, Trash2, X, Pencil, Upload, MapPin, User, Calendar, GitMerge } from 'lucide-react'
+import { Search, UserPlus, Edit2, Trash2, X, Pencil, Upload, MapPin, User, Calendar, GitMerge, Printer } from 'lucide-react'
 import { athleteApi } from '../mockStore.js'
 import { useSettings } from '../SettingsContext.jsx'
 
@@ -1015,6 +1015,287 @@ function AthleteProfilePanel({ athlete, profile, loading, onClose }) {
 }
 
 // ─── Roster Page ──────────────────────────────────────────────
+// ─── Roster Print Helpers ─────────────────────────────────────
+function chunk(arr, n) {
+  const out = []
+  for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n))
+  return out
+}
+
+function printRosterHtml(ref) {
+  const css = Array.from(document.styleSheets).flatMap(sheet => {
+    try { return Array.from(sheet.cssRules).map(r => r.cssText) } catch { return [] }
+  }).filter(t => {
+    const s = t.trimStart()
+    if (s.startsWith('@media') || s.startsWith('@font-face')) return false
+    return s.includes('.print-sheet') || s.includes('.pbreak')
+  }).join('\n')
+  const html = ref.current?.innerHTML ?? ''
+  if (window.electronAPI?.printSheet && html)
+    window.electronAPI.printSheet({ html, css })
+      .then(r => { if (r && !r.success) alert(`Print failed: ${r.reason}`) })
+      .catch(err => alert(`Print error: ${err?.message ?? err}`))
+  else window.print()
+}
+
+function saveRosterPdf(ref, label) {
+  const css = Array.from(document.styleSheets).flatMap(sheet => {
+    try { return Array.from(sheet.cssRules).map(r => r.cssText) } catch { return [] }
+  }).filter(t => {
+    const s = t.trimStart()
+    if (s.startsWith('@media') || s.startsWith('@font-face')) return false
+    return s.includes('.print-sheet') || s.includes('.pbreak')
+  }).join('\n')
+  const html = ref.current?.innerHTML ?? ''
+  if (window.electronAPI?.savePDF && html)
+    window.electronAPI.savePDF({ html, css, suggestedName: `${label}.pdf` })
+      .catch(err => alert(`PDF error: ${err?.message ?? err}`))
+}
+
+const SHIRT_ORDER = ['YXS','YS','YM','YL','YXL','AS','AM','AL','AXL','A2XL','A3XL']
+const SHIRT_LABEL = { YXS:'Youth XS', YS:'Youth S', YM:'Youth M', YL:'Youth L', YXL:'Youth XL',
+  AS:'Adult S', AM:'Adult M', AL:'Adult L', AXL:'Adult XL', A2XL:'Adult 2XL', A3XL:'Adult 3XL' }
+
+const REPORT_TYPES = [
+  { id: 'roster',   label: 'Roster Sheet' },
+  { id: 'contacts', label: 'Emergency Contacts' },
+  { id: 'uniforms', label: 'Uniform Sizes' },
+]
+
+function PrintRosterModal({ athletes, teams, homeTeam, onClose }) {
+  const printRef = useRef(null)
+  const [reportType, setReportType] = useState('roster')
+  const [filterTeam, setFilterTeam]     = useState('all')
+  const [filterGender, setFilterGender] = useState('all')
+
+  const filtered = athletes
+    .filter(a => filterTeam   === 'all' || (a.team || homeTeam) === filterTeam)
+    .filter(a => filterGender === 'all' || a.gender === filterGender)
+    .sort((a, b) => a.last_name.localeCompare(b.last_name) || a.first_name.localeCompare(b.first_name))
+
+  const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+  const teamLabel   = filterTeam   === 'all' ? 'All Teams' : filterTeam
+  const genderLabel = filterGender === 'all' ? '' : filterGender === 'M' ? ' · Boys' : ' · Girls'
+
+  const sheetHeader = (title, subtitle) => (
+    <div style={{ borderBottom: '2pt solid #111', paddingBottom: 6, marginBottom: 10 }}>
+      <div style={{ fontSize: '8pt', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#555' }}>
+        {homeTeam.toUpperCase()}
+      </div>
+      <div style={{ fontSize: '16pt', fontWeight: 800, lineHeight: 1.1, margin: '2px 0' }}>{title}</div>
+      <div style={{ fontSize: '8.5pt', color: '#444' }}>{subtitle}</div>
+    </div>
+  )
+
+  // ── Roster table ──────────────────────────────────────────────
+  const rosterPages = chunk(filtered, 36)
+  const rosterSheets = rosterPages.map((rows, pi) => (
+    <div key={pi} className="print-sheet" style={{ fontFamily: 'Arial, sans-serif', color: '#111', background: '#fff',
+      pageBreakAfter: pi < rosterPages.length - 1 ? 'always' : 'auto' }}>
+      {sheetHeader('Team Roster', `${teamLabel}${genderLabel} · ${today} · ${filtered.length} athletes`)}
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '8.5pt' }}>
+        <thead>
+          <tr style={{ borderBottom: '1.5pt solid #000' }}>
+            {['Name','Age','G','Age Group','Team','Bib #','Shirt'].map(h => (
+              <th key={h} style={{ textAlign: h === 'Name' || h === 'Team' ? 'left' : 'center',
+                padding: '4px 5px', fontSize: '7.5pt', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((a, i) => (
+            <tr key={a.id} style={{ background: i % 2 === 0 ? '#fff' : '#f4f6fa', borderBottom: '0.5pt solid #dde' }}>
+              <td style={{ padding: '4px 5px', fontWeight: 600 }}>{a.last_name}, {a.first_name}</td>
+              <td style={{ padding: '4px 5px', textAlign: 'center' }}>{a.age}</td>
+              <td style={{ padding: '4px 5px', textAlign: 'center' }}>{a.gender}</td>
+              <td style={{ padding: '4px 5px', textAlign: 'center', color: '#555' }}>{getAgeGroup(a.age)}</td>
+              <td style={{ padding: '4px 5px', color: '#555' }}>{a.team || homeTeam}</td>
+              <td style={{ padding: '4px 5px', textAlign: 'center', fontFamily: 'monospace' }}>{a.athlete_number || '—'}</td>
+              <td style={{ padding: '4px 5px', textAlign: 'center' }}>{a.shirt_size || '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {pi < rosterPages.length - 1 && (
+        <div style={{ marginTop: 8, fontSize: '7pt', color: '#aaa', textAlign: 'right' }}>
+          Page {pi + 1} of {rosterPages.length}
+        </div>
+      )}
+    </div>
+  ))
+
+  // ── Emergency contacts ─────────────────────────────────────────
+  const contactPages = chunk(filtered, 10)
+  const contactSheets = contactPages.map((rows, pi) => (
+    <div key={pi} className="print-sheet" style={{ fontFamily: 'Arial, sans-serif', color: '#111', background: '#fff',
+      pageBreakAfter: pi < contactPages.length - 1 ? 'always' : 'auto' }}>
+      {sheetHeader('Emergency Contacts', `${teamLabel}${genderLabel} · ${today} · CONFIDENTIAL`)}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8pt' }}>
+        {rows.map(a => (
+          <div key={a.id} style={{ border: '0.75pt solid #ccc', borderRadius: 4, padding: '6pt 8pt',
+            pageBreakInside: 'avoid', background: '#fff' }}>
+            <div style={{ fontWeight: 800, fontSize: '9.5pt', borderBottom: '0.5pt solid #ddd', paddingBottom: 3, marginBottom: 4 }}>
+              {a.last_name.toUpperCase()}, {a.first_name}
+              <span style={{ fontWeight: 400, fontSize: '7.5pt', color: '#555', marginLeft: 6 }}>
+                Age {a.age} · {a.gender === 'M' ? 'M' : 'F'} · {a.team || homeTeam}
+                {a.athlete_number ? ` · #${a.athlete_number}` : ''}
+              </span>
+            </div>
+            {a.ec1_name ? (
+              <div style={{ marginBottom: 3, fontSize: '8pt' }}>
+                <span style={{ color: '#555', fontSize: '7pt', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Contact 1 </span>
+                <strong>{a.ec1_name}</strong>
+                {a.ec1_rel ? ` (${a.ec1_rel})` : ''}<br />
+                {a.ec1_ph  && <span>📞 {a.ec1_ph}</span>}
+                {a.ec1_ph2 && <span style={{ marginLeft: 8, color: '#555' }}>📞 {a.ec1_ph2}</span>}
+              </div>
+            ) : (
+              <div style={{ fontSize: '7.5pt', color: '#aaa', marginBottom: 3 }}>No contacts on file</div>
+            )}
+            {a.ec2_name && (
+              <div style={{ marginBottom: 3, fontSize: '8pt' }}>
+                <span style={{ color: '#555', fontSize: '7pt', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Contact 2 </span>
+                <strong>{a.ec2_name}</strong>
+                {a.ec2_rel ? ` (${a.ec2_rel})` : ''}<br />
+                {a.ec2_ph && <span>📞 {a.ec2_ph}</span>}
+              </div>
+            )}
+            {a.medical && (
+              <div style={{ marginTop: 3, fontSize: '7.5pt', color: '#c00',
+                background: '#fff5f5', border: '0.5pt solid #fbb', borderRadius: 3, padding: '2pt 4pt' }}>
+                ⚠ {a.medical}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  ))
+
+  // ── Uniform sizes ──────────────────────────────────────────────
+  const bySizeMap = {}
+  const unset = []
+  for (const a of filtered) {
+    if (a.shirt_size) {
+      if (!bySizeMap[a.shirt_size]) bySizeMap[a.shirt_size] = []
+      bySizeMap[a.shirt_size].push(a)
+    } else { unset.push(a) }
+  }
+  const sizeGroups = [
+    ...SHIRT_ORDER.filter(s => bySizeMap[s]).map(s => ({ size: s, label: SHIRT_LABEL[s], athletes: bySizeMap[s] })),
+    ...(unset.length ? [{ size: 'UNSET', label: 'Not Set', athletes: unset }] : []),
+  ]
+  const uniformSheets = (
+    <div className="print-sheet" style={{ fontFamily: 'Arial, sans-serif', color: '#111', background: '#fff' }}>
+      {sheetHeader('Uniform Sizes', `${teamLabel}${genderLabel} · ${today}`)}
+      {sizeGroups.length === 0 ? (
+        <div style={{ color: '#aaa', textAlign: 'center', padding: '20pt' }}>No shirt sizes recorded.</div>
+      ) : sizeGroups.map(group => (
+        <div key={group.size} style={{ marginBottom: '12pt', pageBreakInside: 'avoid' }}>
+          <div style={{ background: '#1e2535', color: '#fff', padding: '3pt 8pt', borderRadius: 3,
+            fontSize: '9pt', fontWeight: 700, marginBottom: 4, display: 'flex', justifyContent: 'space-between' }}>
+            <span>{group.label}</span>
+            <span>{group.athletes.length} athlete{group.athletes.length !== 1 ? 's' : ''}</span>
+          </div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '8.5pt' }}>
+            <tbody>
+              {group.athletes.map((a, i) => (
+                <tr key={a.id} style={{ background: i % 2 === 0 ? '#fff' : '#f4f6fa', borderBottom: '0.5pt solid #dde' }}>
+                  <td style={{ padding: '3px 6px', fontWeight: 600, width: '40%' }}>{a.last_name}, {a.first_name}</td>
+                  <td style={{ padding: '3px 6px', color: '#555', width: '15%' }}>Age {a.age}</td>
+                  <td style={{ padding: '3px 6px', color: '#555', width: '10%' }}>{a.gender}</td>
+                  <td style={{ padding: '3px 6px', color: '#555' }}>{a.team || homeTeam}</td>
+                  {a.athlete_number && <td style={{ padding: '3px 6px', color: '#888', textAlign: 'right' }}>#{a.athlete_number}</td>}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ))}
+    </div>
+  )
+
+  const sheets = reportType === 'roster' ? rosterSheets
+    : reportType === 'contacts' ? contactSheets
+    : [uniformSheets]
+
+  const pdfLabel = `${homeTeam.replace(/\s+/g, '-')}-${reportType}`
+
+  const sideLabelStyle = { fontSize: 10, fontWeight: 600, textTransform: 'uppercase',
+    letterSpacing: '0.07em', color: 'var(--text-muted)', marginBottom: 6 }
+
+  return (
+    <div className="print-modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="print-preview-container"
+        style={{ display: 'flex', flexDirection: 'column', maxWidth: 1050, alignItems: 'stretch', height: '88vh' }}>
+
+        {/* Toolbar */}
+        <div className="print-toolbar">
+          <span style={{ fontWeight: 600, fontSize: 14 }}>Roster Reports</span>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+            <button className="btn btn-ghost" onClick={() => saveRosterPdf(printRef, pdfLabel)}>⬇ Save PDF</button>
+            <button className="btn btn-primary" onClick={() => printRosterHtml(printRef)}>🖨 Print</button>
+            <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={15} /></button>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+
+          {/* Options sidebar */}
+          <div style={{ width: 190, flexShrink: 0, background: 'var(--bg-secondary)',
+            borderRight: '1px solid var(--border)', overflowY: 'auto', padding: '12px 10px' }}>
+
+            <div style={sideLabelStyle}>Report Type</div>
+            {REPORT_TYPES.map(rt => (
+              <button key={rt.id} onClick={() => setReportType(rt.id)}
+                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 10px',
+                  marginBottom: 3, borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12,
+                  background: reportType === rt.id ? 'var(--accent-glow)' : 'transparent',
+                  color: reportType === rt.id ? 'var(--accent)' : 'var(--text-secondary)',
+                  fontWeight: reportType === rt.id ? 600 : 400,
+                  borderLeft: `3px solid ${reportType === rt.id ? 'var(--accent)' : 'transparent'}`,
+                }}>
+                {rt.label}
+              </button>
+            ))}
+
+            <div style={{ ...sideLabelStyle, marginTop: 18 }}>Team</div>
+            <select className="input" style={{ fontSize: 11, padding: '5px 8px', marginBottom: 12 }}
+              value={filterTeam} onChange={e => setFilterTeam(e.target.value)}>
+              <option value="all">All Teams</option>
+              {teams.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+
+            <div style={sideLabelStyle}>Gender</div>
+            <select className="input" style={{ fontSize: 11, padding: '5px 8px' }}
+              value={filterGender} onChange={e => setFilterGender(e.target.value)}>
+              <option value="all">All</option>
+              <option value="M">Boys (M)</option>
+              <option value="F">Girls (F)</option>
+            </select>
+
+            <div style={{ marginTop: 18, padding: '10px 8px', background: 'var(--bg-tertiary)',
+              borderRadius: 6, fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+              {filtered.length} athlete{filtered.length !== 1 ? 's' : ''} selected
+            </div>
+          </div>
+
+          {/* Preview */}
+          <div ref={printRef} className="print-canvas-scroll">
+            {filtered.length === 0
+              ? <div style={{ padding: 40, textAlign: 'center', color: '#bbb', fontSize: 13 }}>No athletes match the selected filters.</div>
+              : sheets
+            }
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function Roster() {
   const { homeTeam: HOME_TEAM } = useSettings()
   const [athletes, setAthletes]   = useState([])
@@ -1034,6 +1315,7 @@ export default function Roster() {
   const [loadingProfile, setLoadingProfile] = useState(false)
   const [importAthletes, setImportAthletes] = useState(null)
   const [importing, setImporting]       = useState(false)
+  const [showPrint, setShowPrint]       = useState(false)
   const [clearingRoster, setClearingRoster] = useState(false)
   const [teamProfiles, setTeamProfiles] = useState({}) // keyed by team name
   const [editingProfile, setEditingProfile] = useState(null) // team name string
@@ -1203,9 +1485,14 @@ export default function Roster() {
             </button>
           )}
           {athletes.length > 0 && (
-            <button className="btn btn-danger" onClick={() => setClearingRoster(true)}>
-              <Trash2 size={15} /> Clear Roster
-            </button>
+            <>
+              <button className="btn btn-ghost" onClick={() => setShowPrint(true)}>
+                <Printer size={15} /> Reports
+              </button>
+              <button className="btn btn-danger" onClick={() => setClearingRoster(true)}>
+                <Trash2 size={15} /> Clear Roster
+              </button>
+            </>
           )}
           <button className="btn btn-primary" onClick={() => setShowAdd(true)}>
             <UserPlus size={15} /> Add Athlete
@@ -1505,6 +1792,16 @@ export default function Roster() {
           athletes={importAthletes}
           onConfirm={handleConfirmImport}
           onClose={() => setImportAthletes(null)}
+        />
+      )}
+
+      {/* Roster report print modal */}
+      {showPrint && (
+        <PrintRosterModal
+          athletes={athletes}
+          teams={teams}
+          homeTeam={HOME_TEAM}
+          onClose={() => setShowPrint(false)}
         />
       )}
 
