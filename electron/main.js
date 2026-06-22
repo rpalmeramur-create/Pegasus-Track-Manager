@@ -182,9 +182,9 @@ function registerAthleteHandlers() {
   ipcMain.handle('athletes:create', (_, data) => {
     const result = db.prepare(`
       INSERT INTO athletes (first_name, last_name, date_of_birth, gender, athlete_number, team, notes,
-        ec1_name, ec1_rel, ec1_ph, ec1_ph2, ec2_name, ec2_rel, ec2_ph, medical)
+        ec1_name, ec1_rel, ec1_ph, ec1_ph2, ec2_name, ec2_rel, ec2_ph, medical, shirt_size)
       VALUES (@first_name, @last_name, @date_of_birth, @gender, @athlete_number, @team, @notes,
-        @ec1_name, @ec1_rel, @ec1_ph, @ec1_ph2, @ec2_name, @ec2_rel, @ec2_ph, @medical)
+        @ec1_name, @ec1_rel, @ec1_ph, @ec1_ph2, @ec2_name, @ec2_rel, @ec2_ph, @medical, @shirt_size)
     `).run({
       first_name: data.first_name, last_name: data.last_name,
       date_of_birth: data.date_of_birth, gender: data.gender,
@@ -195,6 +195,7 @@ function registerAthleteHandlers() {
       ec1_ph:   data.ec1_ph   || null, ec1_ph2: data.ec1_ph2 || null,
       ec2_name: data.ec2_name || null, ec2_rel: data.ec2_rel || null,
       ec2_ph:   data.ec2_ph   || null, medical: data.medical || null,
+      shirt_size: data.shirt_size || null,
     })
     return db.prepare(`
       SELECT *, CAST((julianday('now') - julianday(date_of_birth)) / 365.25 AS INTEGER) AS age
@@ -209,6 +210,7 @@ function registerAthleteHandlers() {
         athlete_number=@athlete_number, team=@team, notes=@notes,
         ec1_name=@ec1_name, ec1_rel=@ec1_rel, ec1_ph=@ec1_ph, ec1_ph2=@ec1_ph2,
         ec2_name=@ec2_name, ec2_rel=@ec2_rel, ec2_ph=@ec2_ph, medical=@medical,
+        shirt_size=@shirt_size,
         updated_at=datetime('now')
       WHERE id=@id
     `).run({
@@ -220,6 +222,7 @@ function registerAthleteHandlers() {
       ec1_ph:   data.ec1_ph   || null, ec1_ph2: data.ec1_ph2 || null,
       ec2_name: data.ec2_name || null, ec2_rel: data.ec2_rel || null,
       ec2_ph:   data.ec2_ph   || null, medical: data.medical || null,
+      shirt_size: data.shirt_size || null,
       id,
     })
     return db.prepare(`

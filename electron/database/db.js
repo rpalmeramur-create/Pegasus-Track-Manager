@@ -152,6 +152,10 @@ module.exports = function initSchema(db) {
     if (!has) db.exec(`ALTER TABLE athletes ADD COLUMN ${col} TEXT`)
   }
 
+  // ─── Migration: shirt size ────────────────────────────────────
+  const hasShirt = db.prepare("SELECT 1 FROM pragma_table_info('athletes') WHERE name='shirt_size'").get()
+  if (!hasShirt) db.exec("ALTER TABLE athletes ADD COLUMN shirt_size TEXT")
+
   // ─── Migration: team_profiles table ──────────────────────────
   db.exec(`
     CREATE TABLE IF NOT EXISTS team_profiles (

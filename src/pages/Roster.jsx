@@ -39,7 +39,8 @@ function AthleteModal({ athlete, teams, onSave, onClose }) {
     ec2_name: athlete?.ec2_name ?? '',
     ec2_rel:  athlete?.ec2_rel  ?? '',
     ec2_ph:   athlete?.ec2_ph   ?? '',
-    medical:  athlete?.medical  ?? '',
+    medical:    athlete?.medical    ?? '',
+    shirt_size: athlete?.shirt_size ?? '',
   })
   const [errors, setErrors] = useState({})
   const [saving, setSaving] = useState(false)
@@ -141,7 +142,7 @@ function AthleteModal({ athlete, teams, onSave, onClose }) {
           </div>
 
           {/* Athlete Number */}
-          <div className="form-group" style={{ gridColumn: 'span 2' }}>
+          <div className="form-group">
             <label className="form-label">
               Athlete # &nbsp;
               <span style={{ color: 'var(--text-muted)', textTransform: 'none', letterSpacing: 0 }}>Optional</span>
@@ -149,6 +150,32 @@ function AthleteModal({ athlete, teams, onSave, onClose }) {
             <input className="input" value={form.athlete_number}
               onChange={e => set('athlete_number', e.target.value)}
               placeholder="Club ID or bib number" />
+          </div>
+
+          {/* Shirt Size */}
+          <div className="form-group">
+            <label className="form-label">
+              Shirt Size &nbsp;
+              <span style={{ color: 'var(--text-muted)', textTransform: 'none', letterSpacing: 0 }}>Optional</span>
+            </label>
+            <select className="input" value={form.shirt_size} onChange={e => set('shirt_size', e.target.value)}>
+              <option value="">— Not set —</option>
+              <optgroup label="Youth">
+                <option value="YXS">Youth XS</option>
+                <option value="YS">Youth S</option>
+                <option value="YM">Youth M</option>
+                <option value="YL">Youth L</option>
+                <option value="YXL">Youth XL</option>
+              </optgroup>
+              <optgroup label="Adult">
+                <option value="AS">Adult S</option>
+                <option value="AM">Adult M</option>
+                <option value="AL">Adult L</option>
+                <option value="AXL">Adult XL</option>
+                <option value="A2XL">Adult 2XL</option>
+                <option value="A3XL">Adult 3XL</option>
+              </optgroup>
+            </select>
           </div>
         </div>
 
@@ -929,6 +956,23 @@ function AthleteProfilePanel({ athlete, profile, loading, onClose }) {
               {!athlete.ec1_name && !athlete.ec2_name && (
                 <div style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', paddingTop: 20, paddingBottom: 10 }}>
                   No emergency contacts on file.
+                </div>
+              )}
+
+              {athlete.shirt_size && (
+                <div style={{
+                  marginTop: 6, padding: '10px 14px',
+                  border: '1px solid var(--border)', borderRadius: 8,
+                  background: 'var(--bg-primary)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                }}>
+                  <div style={{
+                    fontSize: 10, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase',
+                    color: 'var(--text-muted)',
+                  }}>Shirt Size</div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>
+                    {athlete.shirt_size}
+                  </div>
                 </div>
               )}
 
