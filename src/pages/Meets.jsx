@@ -2248,6 +2248,7 @@ function PrintMeetProgramModal({ meet, meetDetail, onClose }) {
   const [eventOrder,  setEventOrder]  = useState([])   // ordered array of event IDs
   const [columns,     setColumns]     = useState(2)
   const [showBib,     setShowBib]     = useState(true)
+  const [nameCase,    setNameCase]    = useState('proper')
   const [dragIdx,     setDragIdx]     = useState(null)
   const [dragOverIdx, setDragOverIdx] = useState(null)
   const printRef = useRef(null)
@@ -2333,6 +2334,14 @@ function PrintMeetProgramModal({ meet, meetDetail, onClose }) {
   const tdStyle = { padding: '3px 6px', fontSize: '8pt', borderBottom: '0.5pt solid #eee' }
   const tdCtr   = { ...tdStyle, textAlign: 'center' }
 
+  const toProper = s => (s || '').replace(/\S+/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+  const fmtName  = (en) => {
+    const last  = en.last_name  || en.gname || ''
+    const first = en.first_name || ''
+    const name  = last ? `${last}${first ? `, ${first}` : ''}` : '—'
+    return nameCase === 'upper' ? name.toUpperCase() : `${toProper(last)}${first ? `, ${toProper(first)}` : ''}`
+  }
+
   const renderAthleteRows = (rows, isField) => rows.map((en, i) => (
     <tr key={en.id} style={{ background: i % 2 === 1 ? '#fafafa' : '#fff' }}>
       <td style={{ ...tdCtr, width: 18 }}>
@@ -2341,7 +2350,7 @@ function PrintMeetProgramModal({ meet, meetDetail, onClose }) {
       </td>
       <td style={{ ...tdCtr, width: 22 }}>{en.lane || '—'}</td>
       {showBib && <td style={{ ...tdCtr, width: 26, fontWeight: 600 }}>{en.athlete_number || '—'}</td>}
-      <td style={tdStyle}>{en.last_name || en.gname || '—'}{en.first_name ? `, ${en.first_name}` : ''}</td>
+      <td style={tdStyle}>{fmtName(en)}</td>
       <td style={{ ...tdStyle, color: '#555', whiteSpace: 'nowrap' }}>{en.team || en.gteam || '—'}</td>
       <td style={{ ...tdCtr, width: 48, fontFamily: 'Courier New, monospace', fontSize: '7.5pt', color: '#222' }}>
         {en.seed_mark || '—'}
@@ -2452,6 +2461,15 @@ function PrintMeetProgramModal({ meet, meetDetail, onClose }) {
               style={{ accentColor: 'var(--acc)' }} />
             Bib #
           </label>
+          <div className="no-print" style={{ display: 'flex', gap: 4 }}>
+            {[['proper','Aa'],['upper','AA']].map(([val, lbl]) => (
+              <button key={val} onClick={() => setNameCase(val)}
+                className={`btn ${nameCase === val ? 'btn-primary' : 'btn-ghost'}`}
+                style={{ fontSize: 11, padding: '3px 10px' }} title={val === 'proper' ? 'Proper case' : 'ALL CAPS'}>
+                {lbl}
+              </button>
+            ))}
+          </div>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
             <button className="btn btn-ghost" onClick={() => savePdfHtml(printRef, meet.name, 'Meet-Program')}>⬇ Save PDF</button>
             <button className="btn btn-primary" onClick={() => printSheetHtml(printRef)}>🖨 Print</button>
