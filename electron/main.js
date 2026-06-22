@@ -1180,9 +1180,10 @@ function registerMeetHandlers() {
       }
     }
 
+    // Slowest/shortest first so Heat/Flight 1 runs first, fastest/best heat last
     const seeded   = entries.filter(e => e.seed_mark).sort((a, b) => isField
-      ? parseSeed(b.seed_mark) - parseSeed(a.seed_mark)
-      : parseSeed(a.seed_mark) - parseSeed(b.seed_mark))
+      ? parseSeed(a.seed_mark) - parseSeed(b.seed_mark)
+      : parseSeed(b.seed_mark) - parseSeed(a.seed_mark))
     const unseeded = entries.filter(e => !e.seed_mark)
     const ordered  = [...seeded, ...unseeded]
 
