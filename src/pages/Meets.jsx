@@ -224,7 +224,8 @@ const FALLBACK = {
     return Promise.resolve(best ?? _db.prs[`${athleteId}_${tfEventId}`] ?? null)
   },
   autoRank:          () => Promise.resolve({ success: true }),
-  clearStatusFlags:  () => Promise.resolve({ success: true, cleared: 0 }),
+  clearStatusFlags:    () => Promise.resolve({ success: true, cleared: 0 }),
+  clearAllStatusFlags: () => Promise.resolve({ success: true, cleared: 0 }),
   seedEvent: () => Promise.resolve({ success: true }),
   getAthletes: athleteApi.getAthletes,
   getSeasons:  () => Promise.resolve([]),
@@ -1136,6 +1137,26 @@ function WorksheetTab({ meet, meetDetail }) {
     setTimeout(() => setActionMsg(''), 3000)
   }
 
+  const handleClearAllStatus = async () => {
+    await api.clearAllStatusFlags(meet.id)
+    if (selectedEvent) {
+      const d = await api.getMeetEventEntries(selectedEvent.id)
+      setEventDetail(d)
+      const init = {}
+      d.entries.forEach(en => {
+        init[en.id] = {
+          seed_mark: en.seed_mark ?? '', mark: en.mark ?? '', wind: en.wind ?? '',
+          did_not_start: !!en.did_not_start, did_not_finish: !!en.did_not_finish,
+          disqualified: !!en.disqualified, place: en.place ?? null,
+          is_pr: !!en.is_pr, attempts_json: en.attempts_json ?? null,
+        }
+      })
+      setResults(init)
+    }
+    setActionMsg('Cleared DNS/DNF/DQ for all events!')
+    setTimeout(() => setActionMsg(''), 3000)
+  }
+
   const handleAutoRank = async () => {
     setRanking(true)
     await Promise.all(Object.keys(results).map(id => saveResult(Number(id))))
@@ -1232,6 +1253,11 @@ function WorksheetTab({ meet, meetDetail }) {
                 onClick={handleSeedAll} disabled={seedingAll || meetDetail.events.length === 0}
                 title="Seed every event in this meet using the heat/field sizes above">
                 <Shuffle size={11} /> {seedingAll ? 'Seeding…' : 'Seed All'}
+              </button>
+              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 8px', whiteSpace: 'nowrap', color: 'var(--warning, #f59e0b)' }}
+                onClick={handleClearAllStatus}
+                title="Clear all DNS/DNF/DQ flags across every event (fixes bad imports — re-set legitimate flags after)">
+                ✕ Clear All DNS/DNF/DQ
               </button>
             </div>
           )

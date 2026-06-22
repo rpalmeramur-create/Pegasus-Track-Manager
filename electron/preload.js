@@ -56,7 +56,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   scratchEntry:          (id, scratched)  => ipcRenderer.invoke('entries:scratch', id, scratched),
   saveResult:            (entryId, data)  => ipcRenderer.invoke('results:save', entryId, data),
   autoRank:              (meetEventId)    => ipcRenderer.invoke('results:autoRank',      meetEventId),
-  clearStatusFlags:      (meetEventId)    => ipcRenderer.invoke('results:clearStatusFlags', meetEventId),
+  clearStatusFlags:      (meetEventId)    => ipcRenderer.invoke('results:clearStatusFlags',    meetEventId),
+  clearAllStatusFlags:   (meetId)         => ipcRenderer.invoke('results:clearAllStatusFlags', meetId),
   advanceAthletes:       (data)           => ipcRenderer.invoke('meetEvents:advance',     data),
   seedEvent:             (meetEventId, heatSize, options) => ipcRenderer.invoke('meets:seedEvent', meetEventId, heatSize, options),
 

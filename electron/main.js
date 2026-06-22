@@ -1107,6 +1107,29 @@ function registerMeetHandlers() {
     return { success: true, cleared }
   })
 
+  // Clear DNS/DNF/DQ across every event in a meet (one-click import fix)
+  ipcMain.handle('results:clearAllStatusFlags', (_, meetId) => {
+    const entries = db.prepare(`
+      SELECT e.id FROM entries e
+      JOIN meet_events me ON me.id = e.meet_event_id
+      WHERE me.meet_id = ?
+    `).all(meetId)
+    const stmtWithMark = db.prepare(`
+      UPDATE results SET did_not_start=0, did_not_finish=0
+      WHERE entry_id=? AND mark IS NOT NULL AND mark != '' AND (did_not_start=1 OR did_not_finish=1)
+    `)
+    const stmtNoMark = db.prepare(`
+      UPDATE results SET did_not_start=0, did_not_finish=0, disqualified=0
+      WHERE entry_id=? AND (mark IS NULL OR mark = '')
+    `)
+    let cleared = 0
+    for (const en of entries) {
+      cleared += stmtWithMark.run(en.id).changes
+      cleared += stmtNoMark.run(en.id).changes
+    }
+    return { success: true, cleared }
+  })
+
   ipcMain.handle('results:autoRank', (_, meetEventId) => {
     const ev = db.prepare(`
       SELECT me.*, e.category FROM meet_events me
