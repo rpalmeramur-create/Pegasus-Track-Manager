@@ -3010,7 +3010,7 @@ function PrintHeatSheetModal({ meet, meetDetail, onClose }) {
         <div className="no-print" style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
 
           {/* Left sidebar: format + events */}
-          <div style={{ width: 230, flexShrink: 0, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div style={{ width: 230, flexShrink: 0, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-secondary)' }}>
 
             {/* Format options — always visible at top */}
             <div style={{ borderBottom: '1px solid var(--border)', padding: '10px 12px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>

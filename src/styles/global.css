@@ -1308,8 +1308,9 @@ textarea.input { resize: vertical; min-height: 72px; }
   color: var(--text-primary);
 }
 
-/* Canvas area where print sheets float — dark bg matches overlay, same as meet program */
+/* Canvas area where print sheets float — dark bg matches meet program overlay */
 .print-canvas {
+  background: #111;
   padding: 24px;
   width: 100%;
   box-sizing: border-box;
@@ -1320,6 +1321,7 @@ textarea.input { resize: vertical; min-height: 72px; }
   border-radius: 0 0 8px 8px;
 }
 .print-canvas-scroll {
+  background: #111;
   flex: 1;
   overflow-y: auto;
   padding: 24px;
