@@ -1,7 +1,9 @@
+import logoSrc from '../assets/logo.png'
+
 export default function AppLogo({ size = 28, className, style }) {
   return (
     <img
-      src="/logo.png"
+      src={logoSrc}
       width={size}
       height={size}
       alt=""
