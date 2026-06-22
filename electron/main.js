@@ -2761,12 +2761,15 @@ function registerRecordsHandlers() {
 function registerAttendanceHandlers() {
   // Sync attendance from entries for a meet (non-override rows only)
   ipcMain.handle('attendance:syncFromEntries', (_, meetId) => {
+    const { readSettings } = require('./settings')
+    const homeTeam = readSettings().homeTeam || 'Pegasus Track'
     const athletes = db.prepare(`
       SELECT DISTINCT e.athlete_id
       FROM entries e
       JOIN meet_events me ON me.id = e.meet_event_id
-      WHERE me.meet_id = ? AND e.athlete_id IS NOT NULL AND e.scratched = 0
-    `).all(meetId)
+      JOIN athletes a ON a.id = e.athlete_id
+      WHERE me.meet_id = ? AND e.athlete_id IS NOT NULL AND e.scratched = 0 AND a.team = ?
+    `).all(meetId, homeTeam)
 
     const upsert = db.prepare(`
       INSERT INTO attendance (athlete_id, meet_id, present, is_override)
@@ -2785,8 +2788,11 @@ function registerAttendanceHandlers() {
     return { synced: sync() }
   })
 
-  // Get all active athletes with their attendance for a specific meet
+  // Get home-team athletes with their attendance for a specific meet
   ipcMain.handle('attendance:getForMeet', (_, meetId) => {
+    const { readSettings } = require('./settings')
+    const homeTeam = readSettings().homeTeam || 'Pegasus Track'
+
     // Auto-derive from entries (any non-scratched entry = attended)
     const fromEntries = new Set(
       db.prepare(`
@@ -2801,9 +2807,9 @@ function registerAttendanceHandlers() {
              att.present, att.is_override, att.notes
       FROM athletes a
       LEFT JOIN attendance att ON att.athlete_id = a.id AND att.meet_id = ?
-      WHERE a.active = 1
+      WHERE a.active = 1 AND a.team = ?
       ORDER BY a.last_name, a.first_name
-    `).all(meetId)
+    `).all(meetId, homeTeam)
 
     return athletes.map(a => ({
       ...a,
@@ -2832,6 +2838,8 @@ function registerAttendanceHandlers() {
 
   // Season summary: per athlete, count meets attended across a season
   ipcMain.handle('attendance:getSeasonSummary', (_, seasonId) => {
+    const { readSettings } = require('./settings')
+    const homeTeam = readSettings().homeTeam || 'Pegasus Track'
     const meets = db.prepare(`
       SELECT id, name, date, type FROM meets
       WHERE season_id = ? AND type != 'runathon'
@@ -2870,7 +2878,7 @@ function registerAttendanceHandlers() {
     const attendedSet = new Set()
     for (const meetId of meetIds) {
       const athleteIds = new Set(
-        db.prepare('SELECT DISTINCT id FROM athletes WHERE active=1').all().map(a => a.id)
+        db.prepare('SELECT DISTINCT id FROM athletes WHERE active=1 AND team=?').all(homeTeam).map(a => a.id)
       )
       for (const aid of athleteIds) {
         const key = `${aid}_${meetId}`
@@ -2882,9 +2890,9 @@ function registerAttendanceHandlers() {
 
     const athletes = db.prepare(`
       SELECT id, first_name, last_name, team, gender
-      FROM athletes WHERE active = 1
+      FROM athletes WHERE active = 1 AND team = ?
       ORDER BY last_name, first_name
-    `).all()
+    `).all(homeTeam)
 
     const athleteRows = athletes.map(a => {
       const attended = meetIds.filter(mid => attendedSet.has(`${a.id}_${mid}`))
