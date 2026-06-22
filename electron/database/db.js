@@ -393,4 +393,13 @@ module.exports = function initSchema(db) {
   ]
   const renameStmt = db.prepare('UPDATE tf_events SET name=? WHERE name=?')
   db.transaction(() => { for (const [from, to] of renames) renameStmt.run(to, from) })()
+
+  // ─── Fix: clear DNS/DNF on results that also have a mark ─────
+  // Old TCL import versions set did_not_start=1 on all entries including
+  // those with a valid mark. A mark proves the athlete competed, so clear
+  // the contradictory flags. DQ is kept because a DQ after finishing is valid.
+  db.exec(`
+    UPDATE results SET did_not_start=0, did_not_finish=0
+    WHERE mark IS NOT NULL AND mark != '' AND (did_not_start=1 OR did_not_finish=1)
+  `)
 }

@@ -1012,6 +1012,7 @@ function registerMeetHandlers() {
   })
 
   ipcMain.handle('results:save', (_, entryId, data) => {
+    try {
     // Resolve entry → event info for PR detection
     const entryInfo = db.prepare(`
       SELECT en.athlete_id, me.tf_event_id, e.category
@@ -1079,19 +1080,29 @@ function registerMeetHandlers() {
       `).run({ ...row, entry_id: entryId })
     }
     return { success: true, is_pr: isPr }
+    } catch (err) {
+      console.error('[results:save] error:', err.message)
+      return { success: false, error: err.message }
+    }
   })
 
   // Clear DNS/DNF/DQ flags for all entries in a meet event (fix bad imports)
   ipcMain.handle('results:clearStatusFlags', (_, meetEventId) => {
     const entries = db.prepare('SELECT id FROM entries WHERE meet_event_id=?').all(meetEventId)
-    const stmt = db.prepare(`
+    // For entries with a mark: clear DNS/DNF only (a mark proves the athlete competed)
+    const stmtWithMark = db.prepare(`
+      UPDATE results SET did_not_start=0, did_not_finish=0
+      WHERE entry_id=? AND mark IS NOT NULL AND mark != '' AND (did_not_start=1 OR did_not_finish=1)
+    `)
+    // For entries without a mark: clear all status flags (bad import artifact)
+    const stmtNoMark = db.prepare(`
       UPDATE results SET did_not_start=0, did_not_finish=0, disqualified=0
-      WHERE entry_id=? AND mark IS NULL
+      WHERE entry_id=? AND (mark IS NULL OR mark = '')
     `)
     let cleared = 0
     for (const en of entries) {
-      const info = stmt.run(en.id)
-      cleared += info.changes
+      cleared += stmtWithMark.run(en.id).changes
+      cleared += stmtNoMark.run(en.id).changes
     }
     return { success: true, cleared }
   })

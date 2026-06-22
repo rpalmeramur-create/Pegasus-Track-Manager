@@ -1034,16 +1034,21 @@ function WorksheetTab({ meet, meetDetail }) {
   const saveResult = async (entryId) => {
     const r = results[entryId]
     if (!r) return
-    const res = await api.saveResult(entryId, {
-      mark:           r.mark           || null,
-      wind:           r.wind           || null,
-      did_not_start:  r.did_not_start,
-      did_not_finish: r.did_not_finish,
-      disqualified:   r.disqualified,
-      dq_reason:      null,
-      attempts_json:  r.attempts_json  || null,
-    })
-    if (res?.is_pr !== undefined) setR(entryId, { is_pr: !!res.is_pr })
+    try {
+      const res = await api.saveResult(entryId, {
+        mark:           r.mark           || null,
+        wind:           r.wind           || null,
+        did_not_start:  r.did_not_start,
+        did_not_finish: r.did_not_finish,
+        disqualified:   r.disqualified,
+        dq_reason:      null,
+        attempts_json:  r.attempts_json  || null,
+      })
+      if (res?.error) console.error('[saveResult]', res.error)
+      else if (res?.is_pr !== undefined) setR(entryId, { is_pr: !!res.is_pr })
+    } catch (err) {
+      console.error('[saveResult] IPC error:', err)
+    }
   }
 
   const handleAddAthlete = async (athlete) => {
@@ -1257,10 +1262,10 @@ function WorksheetTab({ meet, meetDetail }) {
                 <RefreshCw size={12} /> {ranking ? 'Ranking…' : actionMsg || 'Auto-Rank'}
               </button>
               {eventDetail?.entries?.length > 0 && (<>
-                {eventDetail.entries.some(en => (en.did_not_start || en.did_not_finish || en.disqualified) && !en.mark) && (
+                {eventDetail.entries.some(en => en.did_not_start || en.did_not_finish || en.disqualified) && (
                   <button className="btn btn-ghost" style={{ fontSize: 11, padding: '5px 10px', color: 'var(--warning, #f59e0b)' }}
                     onClick={handleClearStatus}
-                    title="Clear DNS/DNF/DQ flags for athletes with no mark (fixes bad imports)">
+                    title="Clear DNS/DNF/DQ flags (fixes bad imports — re-set any legitimate flags after clearing)">
                     ✕ Clear DNS/DNF/DQ
                   </button>
                 )}
