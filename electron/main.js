@@ -2323,6 +2323,7 @@ ${css}
 @page { size: ${pageW} ${pageH}; margin: 0; }
 body  { margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; }
 * { visibility: visible !important; }
+.print-sheet { box-shadow: none !important; border-radius: 0 !important; }
 </style></head><body>${html}</body></html>`
 
     const tmpHtml = path.join(os.tmpdir(), `pegasus-sheet-${Date.now()}.html`)
