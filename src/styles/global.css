@@ -1428,6 +1428,19 @@ textarea.input { resize: vertical; min-height: 72px; }
 }
 
 /* Heat sheet specific */
+.ps-heat-block {
+  margin-top: 14px;
+}
+.ps-heat-label {
+  font-size: 8pt;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #555;
+  padding-bottom: 3px;
+  border-bottom: 1px solid #ccc;
+  margin-bottom: 5px;
+}
 .hs-heat-label {
   font-size: 8pt;
   font-weight: 700;

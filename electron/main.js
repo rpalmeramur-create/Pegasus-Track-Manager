@@ -2310,7 +2310,6 @@ body { margin: 0; padding: 0; }
   // ── Print letter-size sheet (heat sheets / results) ──
   ipcMain.handle('print:sheet', async (_, { html, css, landscape }) => {
     const os = require('os')
-    const { spawn } = require('child_process')
     const { readSettings } = require('./settings')
     const sheetPrinter = readSettings().sheetPrinter || ''
 
@@ -2341,43 +2340,23 @@ body  { margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; }
       // Allow CSS layout to settle after DOM load
       await new Promise(r => setTimeout(r, 400))
 
-      if (!sheetPrinter) {
-        // No printer configured: show the Windows print dialog
-        printWin.show()
-        printWin.focus()
-        return new Promise(resolve => {
-          printWin.webContents.print({ silent: false, printBackground: true }, (success, reason) => {
-            if (!printWin.isDestroyed()) printWin.close()
-            try { fs.unlinkSync(tmpHtml) } catch {}
-            resolve({ success, reason: reason ?? null })
-          })
-        })
-      }
-
-      // Generate PDF — works reliably on hidden windows unlike webContents.print()
-      const pdfData = await printWin.webContents.printToPDF({
+      // Use webContents.print() directly — much faster than printToPDF + PowerShell PrintTo verb
+      // (the PrintTo verb launches a PDF viewer app, causing multi-second delays)
+      const printOpts = {
+        silent: !!sheetPrinter,
         printBackground: true,
-        preferCSSPageSize: true,
-        pageSize: landscape
-          ? { width: 279400, height: 215900 }  // 11in × 8.5in in microns
-          : 'Letter',
+        pageSize: landscape ? { width: 279400, height: 215900 } : 'Letter',
+      }
+      if (sheetPrinter) printOpts.deviceName = sheetPrinter
+      if (!sheetPrinter) { printWin.show(); printWin.focus() }
+
+      return new Promise(resolve => {
+        printWin.webContents.print(printOpts, (success, reason) => {
+          if (!printWin.isDestroyed()) printWin.close()
+          try { fs.unlinkSync(tmpHtml) } catch {}
+          resolve({ success, reason: reason ?? null })
+        })
       })
-      printWin.close()
-      try { fs.unlinkSync(tmpHtml) } catch {}
-
-      const tmpPdf = path.join(os.tmpdir(), `pegasus-sheet-${Date.now()}.pdf`)
-      fs.writeFileSync(tmpPdf, pdfData)
-
-      // Send PDF to the configured printer via Windows PrintTo verb.
-      const safe = (s) => s.replace(/'/g, "''")
-      const ps = spawn('powershell.exe', [
-        '-NonInteractive', '-WindowStyle', 'Hidden', '-Command',
-        `Start-Process -FilePath '${safe(tmpPdf)}' -Verb PrintTo -ArgumentList '${safe(sheetPrinter)}'`,
-      ])
-      ps.once('error', () => {}) // ignore spawn errors — fire-and-forget
-      // Give the PDF viewer 30 s to start spooling before we delete the temp file
-      setTimeout(() => { try { fs.unlinkSync(tmpPdf) } catch {} }, 30000)
-      return { success: true, reason: null }
     } catch (e) {
       if (!printWin.isDestroyed()) printWin.close()
       try { fs.unlinkSync(tmpHtml) } catch {}
