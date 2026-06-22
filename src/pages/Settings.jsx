@@ -473,7 +473,7 @@ function UpdatesSection() {
         <div>
           <div className="settings-section-title">Updates</div>
           <div className="settings-section-sub">
-            Current version: <strong>v0.4.0</strong>
+            Current version: <strong>v0.5.0</strong>
             {result?.latest && ` · Latest: v${result.latest}`}
           </div>
         </div>

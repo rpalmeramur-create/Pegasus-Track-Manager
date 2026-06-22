@@ -1,6 +1,6 @@
 /*
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  PEGASUS TRACK — UNIFIED CLUB MANAGEMENT APP  v0.4.0                       ║
+║  PEGASUS TRACK — UNIFIED CLUB MANAGEMENT APP  v0.5.0                       ║
 ║  React Artifact · window.storage persistence                               ║
 ╠══════════════════════════════════════════════════════════════════════════════╣
 ║  STORAGE KEYS (all personal)                                                ║
@@ -2443,7 +2443,7 @@ function DesktopApp() {
         <div className={'sbl' + (page === 'settings' ? ' on' : '')} onClick={function() { setPage('settings'); }}>
           <Settings size={14} strokeWidth={1.75}/><span>Settings</span>
         </div>
-        <div className="sbver">Pegasus Track v0.4.0</div>
+        <div className="sbver">Pegasus Track v0.5.0</div>
       </aside>
       <main className="main">
         {page === 'dashboard' && <Dashboard athletes={athletes} meets={meets} seasons={seasons} me={me} re={re}/>}

@@ -86,7 +86,7 @@ export default function Sidebar() {
             </button>
           </div>
         )}
-        <div className="sidebar-version">v0.4.0</div>
+        <div className="sidebar-version">v0.5.0</div>
       </div>
     </aside>
   )
