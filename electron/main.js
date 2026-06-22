@@ -1219,7 +1219,8 @@ function registerMeetHandlers() {
       ? parseSeed(a.seed_mark) - parseSeed(b.seed_mark)
       : parseSeed(b.seed_mark) - parseSeed(a.seed_mark))
     const unseeded = entries.filter(e => !e.seed_mark)
-    const ordered  = [...seeded, ...unseeded]
+    // Unseeded athletes go first so they land in the slow/short heats, not the fast ones
+    const ordered  = [...unseeded, ...seeded]
 
     const updateEntry = db.prepare('UPDATE entries SET heat=?, lane=? WHERE id=?')
 
