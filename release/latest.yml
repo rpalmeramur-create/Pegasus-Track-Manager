@@ -1,8 +1,8 @@
 version: 0.5.0
 files:
   - url: Pegasus-Track-Setup-0.5.0.exe
-    sha512: GUWJRAa3BCzi/SCgzcN0eI5CtdaVNcbF6mI7dI5rKgtdroeqb1VLq5CI+p5CcLd17U39+9RDEx0wGspJneY6tg==
-    size: 89450285
+    sha512: uEcq01QUrQj58NIdltl/WhmhDKyyILIWpbAX14rR1cPPcoTSLjqG4ok4SEaoNmWXox0VwFTtK7kVMdnOV/b4eg==
+    size: 89450319
 path: Pegasus-Track-Setup-0.5.0.exe
-sha512: GUWJRAa3BCzi/SCgzcN0eI5CtdaVNcbF6mI7dI5rKgtdroeqb1VLq5CI+p5CcLd17U39+9RDEx0wGspJneY6tg==
-releaseDate: '2026-06-22T03:21:54.004Z'
+sha512: uEcq01QUrQj58NIdltl/WhmhDKyyILIWpbAX14rR1cPPcoTSLjqG4ok4SEaoNmWXox0VwFTtK7kVMdnOV/b4eg==
+releaseDate: '2026-06-22T05:01:58.071Z'
