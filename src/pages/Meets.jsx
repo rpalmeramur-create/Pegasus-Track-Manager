@@ -2247,7 +2247,7 @@ function PrintMeetProgramModal({ meet, meetDetail, onClose }) {
   const [loading,     setLoading]     = useState(true)
   const [eventOrder,  setEventOrder]  = useState([])   // ordered array of event IDs
   const [columns,     setColumns]     = useState(2)
-  const [showBib,     setShowBib]     = useState(true)
+  const [showBib,     setShowBib]     = useState(false)
   const [nameCase,    setNameCase]    = useState('proper')
   const [dragIdx,     setDragIdx]     = useState(null)
   const [dragOverIdx, setDragOverIdx] = useState(null)
