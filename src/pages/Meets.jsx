@@ -984,6 +984,7 @@ function WorksheetTab({ meet, meetDetail }) {
   const [fieldHeatSize,  setFieldHeatSize]  = useState('')   // '' = unlimited
   const [useFlights,    setUseFlights]    = useState(false)
   const [seedingAll,    setSeedingAll]    = useState(false)
+  const [eventSearch,   setEventSearch]   = useState('')
   const [showPrint,         setShowPrint]         = useState(false)
   const [showAwardLabels,   setShowAwardLabels]   = useState(false)
   const [relayLegs,         setRelayLegs]         = useState({})   // entryId → [{leg,athlete_id,first_name,last_name}]
@@ -1107,6 +1108,34 @@ function WorksheetTab({ meet, meetDetail }) {
     setTimeout(() => setActionMsg(''), 3000)
   }
 
+  const handleSeedAll = async () => {
+    if (!meetDetail.events.length) return
+    setSeedingAll(true)
+    await Promise.all(meetDetail.events.map(ev => {
+      const isHurdle = /HURDLE/i.test(ev.event_name)
+      const isFieldEv = ev.category === 'field' || ev.category === 'combined'
+      const size = isHurdle ? hurdleHeatSize : isFieldEv ? (Number(fieldHeatSize) || 9999) : heatSize
+      return api.seedEvent(ev.id, size, { noFlights: false })
+    }))
+    if (selectedEvent) {
+      const d = await api.getMeetEventEntries(selectedEvent.id)
+      setEventDetail(d)
+      const init = {}
+      d.entries.forEach(en => {
+        init[en.id] = {
+          seed_mark: en.seed_mark ?? '', mark: en.mark ?? '', wind: en.wind ?? '',
+          did_not_start: !!en.did_not_start, did_not_finish: !!en.did_not_finish,
+          disqualified: !!en.disqualified, place: en.place ?? null,
+          is_pr: !!en.is_pr, attempts_json: en.attempts_json ?? null,
+        }
+      })
+      setResults(init)
+    }
+    setSeedingAll(false)
+    setActionMsg(`Seeded all ${meetDetail.events.length} events!`)
+    setTimeout(() => setActionMsg(''), 3000)
+  }
+
   const handleAutoRank = async () => {
     setRanking(true)
     await Promise.all(Object.keys(results).map(id => saveResult(Number(id))))
@@ -1199,16 +1228,40 @@ function WorksheetTab({ meet, meetDetail }) {
                 title={hurdleCount === 0 ? 'No hurdle events in this meet' : `Seed all ${hurdleCount} hurdle event${hurdleCount !== 1 ? 's' : ''}`}>
                 <Shuffle size={11} /> {seedingAll ? 'Seeding…' : 'Seed All Hurdles'}
               </button>
+              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 8px', whiteSpace: 'nowrap' }}
+                onClick={handleSeedAll} disabled={seedingAll || meetDetail.events.length === 0}
+                title="Seed every event in this meet using the heat/field sizes above">
+                <Shuffle size={11} /> {seedingAll ? 'Seeding…' : 'Seed All'}
+              </button>
             </div>
           )
         })()}
+        {meetDetail.events.length > 0 && (
+          <div style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>
+            <input
+              type="text"
+              placeholder="Search events…"
+              value={eventSearch}
+              onChange={e => setEventSearch(e.target.value)}
+              style={{ width: '100%', padding: '4px 8px', fontSize: 12, borderRadius: 4,
+                border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text)',
+                boxSizing: 'border-box' }}
+            />
+          </div>
+        )}
         {meetDetail.events.length === 0 ? (
           <div style={{ padding: '24px 16px', color: 'var(--text-muted)', fontSize: 13 }}>
             Add events first in the Events tab.
           </div>
         ) : (
           <div className="meets-event-list">
-            {meetDetail.events.map(ev => (
+            {meetDetail.events.filter(ev => {
+              if (!eventSearch.trim()) return true
+              const q = eventSearch.toLowerCase()
+              return (ev.event_name || '').toLowerCase().includes(q) ||
+                (ev.age_group || '').toLowerCase().includes(q) ||
+                (ev.gender === 'M' ? 'boys' : ev.gender === 'F' ? 'girls' : 'mixed').includes(q)
+            }).map(ev => (
               <button key={ev.id}
                 className={`meets-event-select${selectedEvent?.id === ev.id ? ' active' : ''}`}
                 onClick={() => setSelectedEvent(ev)}>
