@@ -2633,7 +2633,7 @@ function PrintHeatSheetModal({ meet, meetDetail, onClose }) {
   const meetDate = new Date(meet.date + 'T00:00:00')
     .toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
 
-  const groupByHeat = (entries) => {
+  const groupByHeat = (entries, category) => {
     const seeded   = entries.filter(en => en.heat)
     const unseeded = entries.filter(en => !en.heat)
     const map = {}
@@ -2641,8 +2641,28 @@ function PrintHeatSheetModal({ meet, meetDetail, onClose }) {
       if (!map[en.heat]) map[en.heat] = []
       map[en.heat].push(en)
     }
+    const isField = category === 'field' || category === 'combined'
+    const parseSeedVal = (mark) => {
+      if (!mark) return null
+      const v = mark.includes(':')
+        ? (() => { const [m, s] = mark.split(':'); return parseFloat(m) * 60 + parseFloat(s) })()
+        : mark.includes('-')
+          ? (() => { const [ft, inch] = mark.split('-'); return parseFloat(ft) * 12 + parseFloat(inch || 0) })()
+          : parseFloat(mark)
+      return isNaN(v) ? null : v
+    }
+    const getBestMark = (en) => parseSeedVal(en.seed_mark) ?? parseSeedVal(en.mark)
     const heats = Object.entries(map)
-      .sort(([a], [b]) => Number(a) - Number(b))
+      .sort(([, aRows], [, bRows]) => {
+        const aVals = aRows.map(getBestMark).filter(v => v != null)
+        const bVals = bRows.map(getBestMark).filter(v => v != null)
+        if (!aVals.length && !bVals.length) return 0
+        if (!aVals.length) return 1
+        if (!bVals.length) return -1
+        const aBest = isField ? Math.max(...aVals) : Math.min(...aVals)
+        const bBest = isField ? Math.max(...bVals) : Math.min(...bVals)
+        return isField ? aBest - bBest : bBest - aBest
+      })
       .map(([h, rows]) => ({ heat: Number(h), rows: rows.sort((a, b) => (a.lane ?? 99) - (b.lane ?? 99)) }))
     return { heats, unseeded }
   }
@@ -2786,7 +2806,7 @@ function PrintHeatSheetModal({ meet, meetDetail, onClose }) {
       const isField  = ev.category === 'field' || ev.category === 'combined'
       const showWind = ev.category === 'track'  || ev.category === 'relay'
       const nonScr   = (ev.entries ?? []).filter(en => !en.scratched)
-      const { heats, unseeded } = groupByHeat(nonScr)
+      const { heats, unseeded } = groupByHeat(nonScr, ev.category)
 
       const eventTitle = [
         ev.event_name.toUpperCase(),
