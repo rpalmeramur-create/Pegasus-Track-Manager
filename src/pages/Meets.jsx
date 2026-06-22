@@ -2302,16 +2302,16 @@ function PrintMeetProgramModal({ meet, meetDetail, onClose }) {
     const nonScr = (ev.entries ?? []).filter(en => !en.scratched)
     const heatNums = [...new Set(nonScr.filter(e => e.heat).map(e => e.heat))]
     const unseededCount = nonScr.filter(e => !e.heat).length
-    let s = 2.5 // event header + bottom margin
+    let s = 1.8 // event header + bottom margin
     for (const h of heatNums) {
-      s += 2.2 + nonScr.filter(e => e.heat === h).length * 0.95
+      s += 1.6 + nonScr.filter(e => e.heat === h).length * 0.78
     }
-    if (unseededCount > 0) s += 2.2 + unseededCount * 0.95
+    if (unseededCount > 0) s += 1.6 + unseededCount * 0.78
     return s
   }
 
   // Distribute events into pages × columns, filling sequentially
-  const PAGE_CAP = 42 // score units per column per page (≈9in at our font sizes)
+  const PAGE_CAP = 42 // score units per column per page
   const distributePages = (events, numCols) => {
     const pages = []
     let page = [], col = [], colScore = 0, colIdx = 0
@@ -2375,7 +2375,7 @@ function PrintMeetProgramModal({ meet, meetDetail, onClose }) {
     )
 
     return (
-      <div key={ev.id} style={{ marginBottom: 9, breakInside: 'avoid' }}>
+      <div key={ev.id} style={{ marginBottom: 6, breakInside: 'avoid' }}>
         <div style={{ background: '#1a1a2e', color: '#fff', padding: '4px 8px',
           fontSize: '7.5pt', fontWeight: 800, letterSpacing: '0.06em', borderRadius: '2px 2px 0 0' }}>
           {label}
@@ -2422,6 +2422,8 @@ function PrintMeetProgramModal({ meet, meetDetail, onClose }) {
   // Map ev.id → global index for sequential numbering
   const globalIdx = {}
   orderedEvents.forEach((ev, i) => { globalIdx[ev.id] = i })
+
+  const printedDate = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 
   return (
     <div className="print-modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
@@ -2521,12 +2523,20 @@ function PrintMeetProgramModal({ meet, meetDetail, onClose }) {
                     {pageHeader}
                     <div style={{ display: 'grid',
                       gridTemplateColumns: `repeat(${columns}, 1fr)`,
-                      gap: '12pt', alignItems: 'start' }}>
+                      gap: '8pt', alignItems: 'start' }}>
                       {Array.from({ length: columns }, (_, ci) => (
                         <div key={ci}>
                           {(page[ci] ?? []).map(ev => renderEventBlock(ev, globalIdx[ev.id]))}
                         </div>
                       ))}
+                    </div>
+                    <div style={{ marginTop: 10, paddingTop: 5,
+                      borderTop: '0.5pt solid #ccc',
+                      display: 'flex', justifyContent: 'space-between',
+                      fontSize: '7pt', color: '#888' }}>
+                      <span>Pegasus Track · {meet.name}</span>
+                      <span>Printed {printedDate}</span>
+                      <span>Page {pi + 1} of {pages.length}</span>
                     </div>
                   </div>
                 ))}
