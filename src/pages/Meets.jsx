@@ -275,9 +275,10 @@ function printSheetHtml(containerRef) {
   }).join('\n')
 
   const html = containerRef.current?.innerHTML ?? ''
+  const landscape = !!containerRef.current?.querySelector('.print-sheet-landscape')
 
   if (window.electronAPI?.printSheet && html) {
-    window.electronAPI.printSheet({ html, css })
+    window.electronAPI.printSheet({ html, css, landscape })
       .then(r => { if (r && !r.success) alert(`Print failed: ${r.reason}`) })
       .catch(err => alert(`Print error: ${err?.message ?? err}`))
   } else {
@@ -794,7 +795,7 @@ function EventsTab({ meet, meetDetail, tfEvents, onEventAdded, onEventRemoved })
           <TemplatesPanel meet={meet} meetDetail={meetDetail} onEventAdded={onEventAdded} />
         ) : mode === 'bulk' ? (
           /* ── Bulk Setup Panel ── */
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto', flex: 1, minHeight: 0 }}>
 
             {/* Events */}
             <div>
@@ -894,41 +895,44 @@ function EventsTab({ meet, meetDetail, tfEvents, onEventAdded, onEventRemoved })
           </div>
         ) : (
           /* ── Single Event Picker ── */
-          <>
-            <div className="meets-cat-tabs">
-              {CAT_TABS.map(c => (
-                <button key={c}
-                  className={`meets-cat-tab${catFilter === c ? ' active' : ''}`}
-                  onClick={() => setCatFilter(c)}>
-                  {c}
-                </button>
-              ))}
-            </div>
-
-            <div className="meets-picker-list">
-              {filtered.map(ev => {
-                const isSelected = pickerEvent?.id === ev.id
-                return (
-                  <button key={ev.id}
-                    className={`meets-picker-item${isSelected ? ' selected' : ''}`}
-                    onClick={() => setPickerEvent(isSelected ? null : ev)}>
-                    <span className="meets-picker-abbr">{ev.abbreviation}</span>
-                    <span className="meets-picker-name">{ev.name}</span>
-                    <span className="badge badge-neutral" style={{ fontSize: 10, marginLeft: 'auto', flexShrink: 0 }}>
-                      {ev.category}
-                    </span>
+          <div className="meets-single-inner">
+            {/* Left: category tabs + scrollable event list */}
+            <div className="meets-picker-left">
+              <div className="meets-cat-tabs">
+                {CAT_TABS.map(c => (
+                  <button key={c}
+                    className={`meets-cat-tab${catFilter === c ? ' active' : ''}`}
+                    onClick={() => setCatFilter(c)}>
+                    {c}
                   </button>
-                )
-              })}
+                ))}
+              </div>
+              <div className="meets-picker-list">
+                {filtered.map(ev => {
+                  const isSelected = pickerEvent?.id === ev.id
+                  return (
+                    <button key={ev.id}
+                      className={`meets-picker-item${isSelected ? ' selected' : ''}`}
+                      onClick={() => setPickerEvent(isSelected ? null : ev)}>
+                      <span className="meets-picker-abbr">{ev.abbreviation}</span>
+                      <span className="meets-picker-name">{ev.name}</span>
+                      <span className="badge badge-neutral" style={{ fontSize: 10, marginLeft: 'auto', flexShrink: 0 }}>
+                        {ev.category}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
             </div>
 
-            {pickerEvent && (
-              <div className="meets-picker-options">
-                <div style={{ fontFamily: 'var(--font-display)', fontSize: 14, fontWeight: 600,
-                  letterSpacing: '0.04em', marginBottom: 12, color: 'var(--accent)' }}>
-                  {pickerEvent.name}
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+            {/* Right: options panel — always visible */}
+            <div className="meets-picker-options">
+              {pickerEvent ? (
+                <>
+                  <div style={{ fontFamily: 'var(--font-display)', fontSize: 14, fontWeight: 600,
+                    letterSpacing: '0.04em', marginBottom: 14, color: 'var(--accent)' }}>
+                    {pickerEvent.name}
+                  </div>
                   <div className="form-group">
                     <label className="form-label">Gender</label>
                     <select className="input" value={gender} onChange={e => setGender(e.target.value)}>
@@ -944,7 +948,7 @@ function EventsTab({ meet, meetDetail, tfEvents, onEventAdded, onEventRemoved })
                       {AGE_GROUPS.map(a => <option key={a} value={a}>{a}</option>)}
                     </select>
                   </div>
-                  <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                  <div className="form-group" style={{ marginBottom: 16 }}>
                     <label className="form-label">Round</label>
                     <select className="input" value={round} onChange={e => setRound(e.target.value)}>
                       <option value="final">Final</option>
@@ -952,17 +956,26 @@ function EventsTab({ meet, meetDetail, tfEvents, onEventAdded, onEventRemoved })
                       <option value="semi">Semi</option>
                     </select>
                   </div>
+                  {addError && (
+                    <div style={{ fontSize: 12, color: 'var(--red)', marginBottom: 8 }}>{addError}</div>
+                  )}
+                  <button className="btn btn-primary" style={{ width: '100%', marginTop: 'auto' }}
+                    onClick={handleAdd} disabled={adding || alreadyAdded}>
+                    {alreadyAdded ? '✓ Already Added' : adding ? 'Adding…' : `Add ${gLabel(gender)} ${pickerEvent.abbreviation}`}
+                  </button>
+                </>
+              ) : (
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column',
+                  alignItems: 'center', justifyContent: 'center',
+                  gap: 10, color: 'var(--text-muted)', padding: '24px 8px' }}>
+                  <ChevronLeft size={28} style={{ opacity: 0.25 }} />
+                  <span style={{ fontSize: 12, textAlign: 'center', lineHeight: 1.6 }}>
+                    Select an event from<br />the list to configure it
+                  </span>
                 </div>
-                {addError && (
-                  <div style={{ fontSize: 12, color: 'var(--red)', marginBottom: 8 }}>{addError}</div>
-                )}
-                <button className="btn btn-primary" style={{ width: '100%' }}
-                  onClick={handleAdd} disabled={adding || alreadyAdded}>
-                  {alreadyAdded ? '✓ Already Added' : adding ? 'Adding…' : `Add ${gLabel(gender)} ${pickerEvent.abbreviation}`}
-                </button>
-              </div>
-            )}
-          </>
+              )}
+            </div>
+          </div>
         )}
       </div>
     </div>
@@ -2804,8 +2817,8 @@ function PrintHeatSheetModal({ meet, meetDetail, onClose }) {
                 </>
               ) : (
                 <>
-                  <th style={{ width: 68 }}>Time</th>
-                  <th style={{ width: 28 }}>Pl</th>
+                  <th className="hs-write-in-th hs-write-in-sep" style={{ width: 82 }}>Time</th>
+                  <th className="hs-write-in-th" style={{ width: 32 }}>Pl</th>
                 </>
               )}
             </tr>
@@ -2822,8 +2835,8 @@ function PrintHeatSheetModal({ meet, meetDetail, onClose }) {
                     {showTeam && <td style={{ padding: '5px 6px', fontSize: '9pt', color: '#555', whiteSpace: 'nowrap' }}>{en.team || '—'}</td>}
                     {showSeed && <td className="ps-td-center">{en.seed_mark || '—'}</td>}
                     {isField
-                      ? [0,1,2,3,4,5,6].map(n => <td key={n} className="hs-write-in" />)
-                      : <><td className="hs-write-in" /><td className="hs-write-in" /></>
+                      ? [0,1,2,3,4,5,6].map(n => <td key={n} className={`hs-write-in${n === 0 ? ' hs-write-in-sep' : ''}`} />)
+                      : <><td className="hs-write-in hs-write-in-sep" /><td className="hs-write-in" /></>
                     }
                   </tr>
                   {legs.length > 0 && (
@@ -2876,6 +2889,85 @@ function PrintHeatSheetModal({ meet, meetDetail, onClose }) {
     </div>
   )
 
+  // ── High Jump helpers ─────────────────────────────────────
+  const isHighJumpEv = ev => /high jump/i.test(ev.event_name || '')
+  const HJ_BLANK_COLS = 8   // blank height columns — coach writes height in each header
+  const HJ_BLANK_ROWS = 14  // blank athlete rows per page
+  const parseHJIn = mark => {
+    if (!mark) return null
+    const m = String(mark).trim().match(/^(\d+)['\-](\d+)/)
+    return m ? parseInt(m[1]) * 12 + parseInt(m[2]) : null
+  }
+
+  // Athletes pre-printed, height columns blank for hand-writing.
+  // Header cells are merged in pairs (colspan=2) for wider write-in space.
+  const renderHighJumpTable = (entries) => {
+    const sorted = [...entries].sort((a, b) => {
+      const ai = parseHJIn(a.seed_mark) ?? 9999
+      const bi = parseHJIn(b.seed_mark) ?? 9999
+      return ai - bi
+    })
+    const totalRows = Math.max(sorted.length, HJ_BLANK_ROWS)
+    return (
+      <div>
+        <table className="ps-table" style={{ fontSize: '8pt', tableLayout: 'fixed', width: '100%' }}>
+          <colgroup>
+            <col />
+            <col style={{ width: '52pt' }} />
+            <col style={{ width: '34pt' }} />
+            {Array.from({ length: HJ_BLANK_COLS }, (_, i) => <col key={i} style={{ width: '36pt' }} />)}
+            <col style={{ width: '30pt' }} />
+            <col style={{ width: '20pt' }} />
+          </colgroup>
+          <thead>
+            <tr>
+              <th style={{ textAlign: 'left', fontSize: '7pt', verticalAlign: 'bottom', paddingBottom: '2pt' }}>Name</th>
+              <th style={{ textAlign: 'left', fontSize: '7pt', verticalAlign: 'bottom', paddingBottom: '2pt' }}>Team</th>
+              <th style={{ textAlign: 'center', fontSize: '7pt', verticalAlign: 'bottom', paddingBottom: '2pt' }}>Seed</th>
+              {Array.from({ length: HJ_BLANK_COLS }, (_, i) => (
+                <th key={i}
+                  className={i === 0 ? 'hs-hj-sep' : ''}
+                  style={{ borderBottom: '1.5pt solid #888', borderLeft: i === 0 ? '2pt solid #bbb' : '1pt solid #aaa', height: '24pt', padding: 0, verticalAlign: 'bottom' }} />
+              ))}
+              <th className="hs-write-in-sep" style={{ textAlign: 'center', fontSize: '7pt', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', paddingBottom: '3pt', verticalAlign: 'bottom' }}>Best</th>
+              <th style={{ textAlign: 'center', fontSize: '7pt', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', paddingBottom: '3pt', verticalAlign: 'bottom', borderLeft: '0.75pt solid #bbb' }}>Pl</th>
+            </tr>
+          </thead>
+          <tbody>
+            {Array.from({ length: totalRows }, (_, i) => {
+              const en = sorted[i]
+              return (
+                <tr key={i} className={i % 2 === 1 ? 'ps-row-shade' : ''}>
+                  <td className="ps-td-name" style={{ fontSize: '10pt', verticalAlign: 'middle' }}>
+                    {en ? fmtName(en.last_name, en.first_name) : ''}
+                  </td>
+                  <td style={{ fontSize: '9pt', verticalAlign: 'middle', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {en?.team ?? ''}
+                  </td>
+                  <td style={{ textAlign: 'center', fontSize: '8.5pt', verticalAlign: 'middle', whiteSpace: 'nowrap', overflow: 'hidden' }}>
+                    {en?.seed_mark ?? ''}
+                  </td>
+                  {Array.from({ length: HJ_BLANK_COLS }, (_, ci) => (
+                    <td key={ci} className={`hs-hj-cell${ci === 0 ? ' hs-hj-sep' : ''}`}>
+                      <span className="hs-hj-try" />
+                      <span className="hs-hj-try" />
+                      <span className="hs-hj-try" />
+                    </td>
+                  ))}
+                  <td className="hs-write-in hs-write-in-sep" style={{ verticalAlign: 'bottom', background: 'transparent' }} />
+                  <td className="hs-write-in" style={{ verticalAlign: 'bottom', borderLeft: '0.75pt solid #bbb', background: 'transparent' }} />
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+        <div style={{ marginTop: 6, fontSize: '6.5pt', color: '#888', fontStyle: 'italic' }}>
+          Write height in each column header · O = Cleared · X = Failed attempt · r = Passed · 3 attempts per height
+        </div>
+      </div>
+    )
+  }
+
   // ── Build pages array ─────────────────────────────────────
   const buildPages = () => {
     const pages = []
@@ -2885,6 +2977,27 @@ function PrintHeatSheetModal({ meet, meetDetail, onClose }) {
       const isField  = ev.category === 'field' || ev.category === 'combined'
       const showWind = ev.category === 'track'  || ev.category === 'relay'
       const nonScr   = (ev.entries ?? []).filter(en => !en.scratched)
+
+      // High jump: blank write-in grid — coach fills names and heights by hand
+      if (isHighJumpEv(ev)) {
+        const isLast = evIdx === totalEvs - 1
+        const eventTitle = [
+          ev.event_name.toUpperCase(),
+          ev.gender === 'M' ? 'BOYS' : ev.gender === 'F' ? 'GIRLS' : 'MIXED',
+          ev.age_group || null,
+          (ev.round || 'FINAL').toUpperCase(),
+        ].filter(Boolean).join(' · ')
+        pages.push(
+          <div key={ev.id} className="print-sheet"
+            style={{ marginBottom: isLast ? 0 : 24, pageBreakAfter: isLast ? 'auto' : 'always' }}>
+            {renderPageHeader(eventTitle)}
+            {renderHighJumpTable(nonScr)}
+            {renderFooter(`Event ${evIdx + 1} of ${totalEvs}`)}
+          </div>
+        )
+        return
+      }
+
       const { heats, unseeded } = groupByHeat(nonScr, ev.category)
 
       const eventTitle = [

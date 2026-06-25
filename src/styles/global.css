@@ -882,7 +882,7 @@ textarea.input { resize: vertical; min-height: 72px; }
 .meets-col-right {
   background: var(--bg-card); border: 1px solid var(--border);
   border-radius: var(--radius-lg); padding: 20px;
-  overflow-y: auto;
+  display: flex; flex-direction: column; overflow: hidden;
 }
 
 .meets-col-header {
@@ -927,7 +927,7 @@ textarea.input { resize: vertical; min-height: 72px; }
 .meets-cat-tab.active { background: var(--accent-glow); color: var(--accent); border-color: rgba(56,189,248,.25); }
 
 .meets-picker-list {
-  overflow-y: auto; max-height: 280px;
+  overflow-y: auto; flex: 1; min-height: 0;
   border-bottom: 1px solid var(--border);
 }
 .meets-picker-item {
@@ -949,7 +949,26 @@ textarea.input { resize: vertical; min-height: 72px; }
 .meets-picker-name { flex: 1; font-size: 13px; }
 
 .meets-picker-options {
-  padding: 14px; border-top: 1px solid var(--border);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 14px;
+  display: flex; flex-direction: column; gap: 2px;
+  overflow-y: auto;
+}
+
+.meets-single-inner {
+  display: grid;
+  grid-template-columns: 1fr 260px;
+  gap: 12px;
+  flex: 1; min-height: 0; overflow: hidden;
+}
+
+.meets-picker-left {
+  display: flex; flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
 }
 
 /* Entries table */
@@ -1118,11 +1137,20 @@ textarea.input { resize: vertical; min-height: 72px; }
   @page { size: 8.5in 11in; margin: 0; }
   body * { visibility: hidden !important; }
   .print-sheet,              .print-sheet *              { visibility: visible !important; }
+  .print-sheet-landscape,    .print-sheet-landscape *    { visibility: visible !important; }
   .award-labels-print-wrap,  .award-labels-print-wrap *  { visibility: visible !important; }
   .print-sheet {
     position: fixed !important;
     top: 0; left: 0;
     width: 8.5in;
+    margin: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+  .print-sheet-landscape {
+    position: fixed !important;
+    top: 0; left: 0;
+    width: 11in;
     margin: 0 !important;
     box-shadow: none !important;
     border: none !important;
@@ -1323,7 +1351,7 @@ textarea.input { resize: vertical; min-height: 72px; }
 .print-canvas-scroll {
   background: #111;
   flex: 1;
-  overflow-y: auto;
+  overflow: auto;
   padding: 24px;
   display: flex;
   flex-direction: column;
@@ -1339,12 +1367,30 @@ textarea.input { resize: vertical; min-height: 72px; }
   color: #111;
   font-family: Arial, Helvetica, sans-serif;
   font-size: 10pt;
-  padding: 0.6in 0.6in 0.5in;
+  padding: 0.5in;
+  margin: 0 auto;
   box-shadow: 0 4px 32px rgba(0,0,0,0.5);
   border-radius: 4px;
 }
 /* Each sheet after the first starts on a new page in the PDF */
 .print-sheet + .print-sheet {
+  page-break-before: always;
+  break-before: page;
+}
+
+/* Landscape variant — used for High Jump sheets (11×8.5) */
+.print-sheet-landscape {
+  width: 11in;
+  min-height: 8.5in;
+  background: #fff;
+  color: #111;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 10pt;
+  padding: 0.5in;
+  box-shadow: 0 4px 32px rgba(0,0,0,0.5);
+  border-radius: 4px;
+}
+.print-sheet-landscape + .print-sheet-landscape {
   page-break-before: always;
   break-before: page;
 }
@@ -1451,10 +1497,44 @@ textarea.input { resize: vertical; min-height: 72px; }
   margin-bottom: 5px;
 }
 .hs-write-in {
-  background: #fffde7;
-  border-bottom: 1.5px solid #aaa !important;
+  background: #fef9c3;
+  border-bottom: 2pt solid #555 !important;
   min-width: 44px;
-  padding: 4px;
+  padding: 10px 5px 4px;
+}
+
+/* Left-border separator on the first write-in column */
+.hs-write-in-sep {
+  border-left: 2pt solid #bbb !important;
+}
+
+/* ── High Jump height-progression sheet ──────────────────── */
+.hs-hj-cell {
+  padding: 0;
+  vertical-align: top;
+  background: transparent;
+  border-left: 1pt solid #aaa;
+}
+.hs-hj-cell.hs-hj-sep {
+  border-left: 2pt solid #bbb !important;
+}
+.hs-hj-try {
+  display: block;
+  height: 14pt;
+  border-bottom: 0.5pt solid #ccc;
+}
+.hs-hj-try:last-child {
+  border-bottom: none;
+}
+
+/* Header cells above write-in columns */
+.hs-write-in-th {
+  background: #fef3c7 !important;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 7pt;
+  color: #7c5a1e;
+  font-weight: 700;
 }
 
 /* Meet list cards */
@@ -1858,6 +1938,37 @@ textarea.input { resize: vertical; min-height: 72px; }
   --shadow-md:            0 4px 12px rgba(0,0,0,.10);
   --shadow-lg:            0 8px 32px rgba(0,0,0,.14);
   --shadow-accent:        0 0 20px rgba(14,165,233,.15);
+  --green-glow:           rgba(16,185,129,0.13);
+  --red-glow:             rgba(239,68,68,0.10);
+  --gold-glow:            rgba(245,158,11,0.12);
+  --purple-glow:          rgba(168,85,247,0.10);
+}
+
+/* ── Graphite — dark gray, between Night and Gray ──────── */
+[data-theme="graphite"] {
+  --bg-primary:           #2e333e;
+  --bg-secondary:         #262b35;
+  --bg-tertiary:          #1f2430;
+  --bg-card:              #353b47;
+  --bg-hover:             #3d4352;
+  --bg-active:            #454c5c;
+  --border:               #414859;
+  --border-light:         #4a5268;
+  --border-focus:         rgba(56,189,248,0.4);
+  --text-primary:         #dce3ec;
+  --text-secondary:       #8a98b0;
+  --text-muted:           #5a6880;
+  --text-inverse:         #1a1f28;
+  --accent:               #38bdf8;
+  --accent-dark:          #0ea5e9;
+  --accent-glow:          rgba(56,189,248,0.12);
+  --accent-glow-strong:   rgba(56,189,248,0.25);
+  --accent-border:        rgba(56,189,248,0.18);
+  --accent-border-strong: rgba(56,189,248,0.32);
+  --shadow-sm:            0 1px 3px rgba(0,0,0,.18);
+  --shadow-md:            0 4px 14px rgba(0,0,0,.26);
+  --shadow-lg:            0 8px 32px rgba(0,0,0,.34);
+  --shadow-accent:        0 0 20px rgba(56,189,248,.18);
   --green-glow:           rgba(16,185,129,0.13);
   --red-glow:             rgba(239,68,68,0.10);
   --gold-glow:            rgba(245,158,11,0.12);
