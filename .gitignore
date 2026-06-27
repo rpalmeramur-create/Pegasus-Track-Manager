@@ -6,3 +6,8 @@ dist
 *.db
 *.db-shm
 *.db-wal
+
+# Screenshots and diagnostic scripts
+ss-*.png
+screenshot-*.png
+test-*.mjs
