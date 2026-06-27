@@ -2169,7 +2169,7 @@ function ResultsTab({ meet, meetDetail, onScoringChange }) {
   const completedCount = eventsData.filter(ev => ev.entries?.some(en => en.place)).length
 
   return (
-    <div>
+    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 2px' }}>
       {/* Team score summary — shown whenever 2+ teams have points */}
       <TeamScoreSummary eventsData={eventsData} />
 

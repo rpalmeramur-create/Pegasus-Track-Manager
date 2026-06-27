@@ -882,7 +882,7 @@ textarea.input { resize: vertical; min-height: 72px; }
 .meets-col-right {
   background: var(--bg-card); border: 1px solid var(--border);
   border-radius: var(--radius-lg); padding: 20px;
-  display: flex; flex-direction: column; overflow: hidden;
+  display: flex; flex-direction: column; overflow-y: auto;
 }
 
 .meets-col-header {
