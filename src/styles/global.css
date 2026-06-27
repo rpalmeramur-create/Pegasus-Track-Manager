@@ -871,18 +871,18 @@ textarea.input { resize: vertical; min-height: 72px; }
 .meets-tab-body { padding: 24px 32px; }
 
 .meets-two-col {
-  display: grid; grid-template-columns: 280px 1fr; gap: 20px;
+  display: grid; grid-template-columns: 280px 1fr; grid-template-rows: 1fr; gap: 20px;
   flex: 1; min-height: 0; overflow: hidden;
 }
 .meets-col-left {
   background: var(--bg-card); border: 1px solid var(--border);
   border-radius: var(--radius-lg); overflow: hidden;
-  display: flex; flex-direction: column;
+  display: flex; flex-direction: column; min-height: 0;
 }
 .meets-col-right {
   background: var(--bg-card); border: 1px solid var(--border);
   border-radius: var(--radius-lg); padding: 20px;
-  display: flex; flex-direction: column; overflow-y: auto;
+  display: flex; flex-direction: column; overflow-y: auto; min-height: 0;
 }
 
 .meets-col-header {
