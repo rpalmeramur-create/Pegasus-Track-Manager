@@ -215,6 +215,7 @@ function registerAthleteHandlers() {
       WHERE id=@id
     `).run({
       ...data,
+      date_of_birth: data.date_of_birth || null,
       athlete_number: data.athlete_number || null,
       team: data.team || 'Pegasus Track',
       notes: data.notes || null,
@@ -1276,6 +1277,24 @@ function registerMeetHandlers() {
         if (!heats[h]) heats[h] = []
         heats[h].push(e)
       })
+
+      // For non-hurdle running events: if the last heat has only 1 athlete,
+      // pull the slowest athlete from the previous heat to run with them.
+      const isHurdle = /HURDLE/i.test(ev.event_name || '')
+      if (!isHurdle) {
+        const heatNums = Object.keys(heats).map(Number).sort((a, b) => a - b)
+        if (heatNums.length >= 2) {
+          const lastHeatNum = heatNums[heatNums.length - 1]
+          const prevHeatNum = heatNums[heatNums.length - 2]
+          if (heats[lastHeatNum].length === 1 && heats[prevHeatNum].length > 1) {
+            // Take the fastest athlete from the previous heat (closest in speed to the lone athlete)
+            heats[prevHeatNum].sort((a, b) => parseSeed(a.seed_mark) - parseSeed(b.seed_mark))
+            const fastest = heats[prevHeatNum].shift()
+            heats[lastHeatNum].push(fastest)
+          }
+        }
+      }
+
       db.transaction(() => {
         Object.entries(heats).forEach(([h, hEntries]) => {
           hEntries

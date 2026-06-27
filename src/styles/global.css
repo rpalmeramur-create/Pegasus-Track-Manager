@@ -1497,7 +1497,7 @@ textarea.input { resize: vertical; min-height: 72px; }
   margin-bottom: 5px;
 }
 .hs-write-in {
-  background: #fef9c3;
+  background: inherit;
   border-bottom: 2pt solid #555 !important;
   min-width: 44px;
   padding: 10px 5px 4px;
@@ -1529,11 +1529,11 @@ textarea.input { resize: vertical; min-height: 72px; }
 
 /* Header cells above write-in columns */
 .hs-write-in-th {
-  background: #fef3c7 !important;
+  background: transparent;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   font-size: 7pt;
-  color: #7c5a1e;
+  color: inherit;
   font-weight: 700;
 }
 

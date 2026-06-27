@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { Cloud, CheckCircle, AlertCircle, RefreshCw, Eye, EyeOff, ExternalLink, Plus, X, Zap, Palette, Pencil, Shield, Trash2, KeyRound } from 'lucide-react'
 import { THEMES, getSavedTheme, applyTheme } from '../theme.js'
-import { getAutoPrint, setAutoPrint } from '../printPrefs.js'
+import { getAutoPrint, setAutoPrint, getDefaultLabelFormat, setDefaultLabelFormat, getDefaultHeatSheetPageBreak, setDefaultHeatSheetPageBreak } from '../printPrefs.js'
 import { useAuth } from '../AuthContext.jsx'
 
 // ─── Status Badge ─────────────────────────────────────────────
@@ -803,7 +803,9 @@ export default function Settings() {
   const [hasClaudeKey, setHasClaudeKey] = useState(false)
   const [printers, setPrinters]         = useState([])
   const [printerSaved, setPrinterSaved] = useState(false)
-  const [autoPrint,  setAutoPrintState]   = useState(() => getAutoPrint())
+  const [autoPrint,        setAutoPrintState]      = useState(() => getAutoPrint())
+  const [defaultLabelFmt,  setDefaultLabelFmtState] = useState(() => getDefaultLabelFormat())
+  const [defaultHsBreak,   setDefaultHsBreakState]  = useState(() => getDefaultHeatSheetPageBreak())
   const [showWindInRecords, setShowWindInRecords] = useState(false)
   const [loading, setLoading]           = useState(true)
 
@@ -1014,6 +1016,33 @@ export default function Settings() {
                 <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                   Skip the print preview and send directly to the configured printer (or PDF if none is set).
                 </div>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 4 }}>
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label">Default Award Label Format</label>
+                <select className="input" value={defaultLabelFmt}
+                  onChange={e => { setDefaultLabelFmtState(e.target.value); setDefaultLabelFormat(e.target.value) }}>
+                  <option value="thermal1x4">Thermal — 1″ × 4″ (wide)</option>
+                  <option value="thermal4x2">Thermal — 4″ × 2″</option>
+                  <option value="thermal2x4">Thermal — 2″ × 4″</option>
+                  <option value="thermal1x1">Thermal — 1″ × 1″</option>
+                  <option value="avery5163">Avery 5163 — 2″ × 4″ (sheet)</option>
+                  <option value="avery5160">Avery 5160 — 1″ × 2⅝″ (sheet)</option>
+                </select>
+                <span className="form-hint">Opens the award label dialog with this format pre-selected.</span>
+              </div>
+
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label">Default Heat Sheet Page Break</label>
+                <select className="input" value={defaultHsBreak}
+                  onChange={e => { setDefaultHsBreakState(e.target.value); setDefaultHeatSheetPageBreak(e.target.value) }}>
+                  <option value="event">Page break per event</option>
+                  <option value="heat">Page break per heat</option>
+                  <option value="none">No page breaks</option>
+                </select>
+                <span className="form-hint">Default page break when opening heat sheet or results prints.</span>
               </div>
             </div>
 
